@@ -4,9 +4,9 @@
 #include <time.h>
 #include <string.h>
 
-#define CHUNK_BYTE_SIZE "7"
+#define CHUNK_BYTE_SIZE "7"    // Number of bytes for each chunk
 
-int main(int argc, char **argv)
+int main( int argc, char **argv )
 {
   char *file_name = argv[1];
   pid_t chunk_proc;
@@ -48,7 +48,7 @@ int main(int argc, char **argv)
 	  
 	 */
 
-	execlp( "split", "split", "-b", CHUNK_BYTE_SIZE , argv[1], time_str,  NULL);
+	execlp( "split", "split", "-b", CHUNK_BYTE_SIZE , file_name, time_str,  NULL);
 	break;
       }
 
