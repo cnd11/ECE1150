@@ -1,0 +1,86 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+
+use CGI::Carp qw/fatalsToBrowser/;
+use CGI qw/standard/;
+use CGI::Ajax;
+use CGI::Session;
+use Data::Dumper;
+use File::Find;
+use File::Basename;
+use Auth;
+
+my $cgi  = CGI->new;
+my $auth = Auth->new;
+my $session = CGI::Session->new;
+my $ajax = new CGI::Ajax( test_js => \&test_perl );
+
+my $name = $session->param( 'uname' );
+
+my @files;
+find(\&wanted, "/var/www/data/$name");
+
+@files = grep { -f $_ } @files;
+my @path_show = grep { $_=~s/\/var\/www\/data/ /g  } @files;
+@files = map { basename($_)  } @files;
+
+my $fl = join "<br>", @files;
+my $full = join "<br>", @path_show;
+
+#$ajax->register(test_js => \&test_perl);
+
+if ($auth->validate) {
+    print $cgi->redirect(-URL =>'http://' . $ENV{SERVER_NAME} . '/cgi-bin/home');
+} 
+
+print $ajax->build_html($cgi, \&show_html);
+
+sub wanted {
+    push (@files, $File::Find::name);
+    return;
+}
+
+sub test_perl
+{
+    my $upload = $cgi->upload('upload_file');
+    return ("<p id='goAway'>THIS SHOULD DISAPPEAR!<p>" . $upload);
+}
+
+sub show_html 
+{
+return <<QED; 
+<!DOCTYPE html>
+  <html>
+    <head>
+      <script type="text/javascript" src="/jquery-2.0.3.min.js"> </script>
+      <script type="text/javascript" src="/js/home.js">  </script>
+    </head>
+
+    <body>	
+      <div id="heading">
+        <span id="welcome">Welcome $name!</span>
+	<span>
+	  $fl
+	  <br>
+	  <br>
+	  $full
+	</span>
+      </div>
+
+      <input type='button' value="ok1" onClick="test_js([],[disappear])" />
+      
+      <p id="disp"> </p>
+      
+      <form enctype='multipart/form-data'>
+	<input type='file'   id='file' name='upload_file' />
+	<input type='button' id='submit_upload' value='Upload' />
+      </form>
+      
+      <p id="uploads">    </p>
+
+    </body>
+  </html>
+QED
+}

@@ -1,0 +1,61 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+
+use CGI qw/standard/;
+use CGI::Carp qw/fatalsToBrowser/;
+use Data::Dumper;
+
+my $cgi = CGI->new;
+show_html();
+
+sub show_html 
+{
+print <<QED;
+Content-type: text/html\r\n\r\n
+    <!DOCTYPE html>
+      <html>
+	<head>
+	  
+	<script tpye="text/javascript" src="/jquery-2.0.3.min.js"> </script>
+	<script tpye="text/javascript">
+	    
+          \$(document).ready(function() {
+	      \$('#submit_upload').click(function() {
+		  var form_data = new FormData(\$('form')[0]);
+
+		  \$.ajax({
+		      type: 'POST',
+		      url: '/cgi-bin/upload.pl',
+		      data: form_data,
+		      success: function(data) {
+			  alert("Upload!");
+			  \$("#uploads").append(data);
+		      },
+		      error: function(data) {
+			  alert("Failure! ");
+			  console.log("my obj %o", data);
+		      },
+		      cache: false,
+		      contentType: false,
+		      processData: false,
+		  });
+	      });
+	  });
+
+        </script>
+
+	</head>
+	<body>
+	<form enctype='multipart/form-data'>
+	  <input type='file'   id='file' name='upload_file' />
+	  <input type='button' id='submit_upload' value='Upload' />
+        </form>
+
+	<p id="uploads">
+	</p>
+      </body>
+    </html>
+QED
+}

@@ -1,0 +1,62 @@
+#!/usr/bin/perl -w
+
+push (@INC, '/home/pi/perl5/lib/perl5');
+
+use strict;
+use warnings;
+
+use CGI::Carp qw/fatalsToBrowser/;
+use CGI qw/standard/;
+use CGI qw/Ajax/;
+use Data::Dumper;
+
+print "Content-type: text/html\r\n\r\n";
+
+my $q = CGI->new;
+
+print <<'QED';
+<!DOCTYPE html>
+<html>
+  <head> 
+    <link rel="stylesheet" type="text/css" href="/css/login.css" />
+  </head>
+  
+  <body>
+    <div id="wrapper"  style="position:relative">
+      <div id="banner">
+	<h1 style="font-family:'Open Sans',courier new;font-size:38px;font-weight:300;color:rgb(85,85,85);direction:ltr;">
+	  One account. None of Google. </br>
+	</h1>
+	
+	<h2 style="font-family:'Open Sans',courier new;font-size:18px;font-weight:400;color:rgb(85,85,85);direction:ltr;">
+	  Sign in with your !Google Drive Account.
+	</h2>
+      </div>
+      
+      <div id="login-container">
+	
+	<div id="login">
+	
+	  <form id="login_form" action="/cgi-bin/handle.pl?process=login" method="post">
+	    <input id="uname" autocomplete="off" type="text" value="" placeholder="Name" name="uname"/>
+	    <input id="pword" type="password" value="" placeholder="Password" name="pword"/>
+	    <input id="submit" type="submit" value="Sign In" name="signIn"/>
+	  </form>
+QED
+    my $pass_err = $q->param('pass');
+    my $user_err = $q->param('user');
+    
+    if(defined $pass_err || defined $user_err)  {
+	print '<div id="error" style="color:red;font-size:14px;">';
+	(defined $user_err && $user_err == '0' ) ? print "Enter your name.<br>" : print "";
+	(defined $pass_err && $pass_err == '0' ) ? print "Enter your password.<br>" : print "";
+	(defined $pass_err && $pass_err == '1' ) ? print "Incorrect password.<br>" : print "";
+	print '</div>';
+    }
+
+
+print <<'block'	  
+	</div>
+      </div>
+    </div>
+block
