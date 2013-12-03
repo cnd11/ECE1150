@@ -17,7 +17,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DATA_NODE_PORT 48009
+#define DATA_NODE_PORT 48010
 #define CHUNK_SIZE 1024
 #define MY_IP "169.254.0.2"
 
@@ -34,7 +34,7 @@ typedef struct nameNodeRequest{
 	char directory[30];
 	char filename[30];
 	char newFilename[30];
-	char chunkNo;
+	char chunkNo[3];
 } nameNodeRequest;
 
 const char* ackPacket; // ACK and NAK packets
@@ -51,6 +51,7 @@ int main(void){
 	printf("Creating data node listen socket... ");
 	if((listenSocket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1){
 		perror("DATA NODE: Error creating listen socket");
+		exit(EXIT_FAILURE);
 	}
 	printf("Created!\n");
 
@@ -64,6 +65,7 @@ int main(void){
 	if((bind(listenSocket, (struct sockaddr *) &listenSocketAddr, sizeof(listenSocketAddr))) == -1){
 		perror("DATA NODE: Error binding listen socket");
 		close(listenSocket);
+		exit(EXIT_FAILURE);
 	}
 	printf("Bound!\n");
 
@@ -73,58 +75,74 @@ int main(void){
 	}
 	printf("Listening.\n");
 
+	struct sockaddr_in nameNodeSocketAddr;
+	socklen_t nameNodeSocketAddrLen = sizeof(nameNodeSocketAddr);
+	printf("Accepting connections from name node... ");
+	if((nameNodeSocket = accept(listenSocket, (struct sockaddr *) &nameNodeSocketAddr, &nameNodeSocketAddrLen)) <= 0){
+		perror("DATA NODE: Error accepting new connection");
+		close(listenSocket);
+	}
+	printf("Name node connected!\n");
+	
 	nameNodeRequest* packet = (nameNodeRequest*)(malloc (sizeof(nameNodeRequest))); // request packet from name node
 	char tempBuffer[CHUNK_SIZE]; // buffer for reading and writing
 	while(1){
-		struct sockaddr_in nameNodeSocketAddr;
-		socklen_t nameNodeSocketAddrLen = sizeof(nameNodeSocketAddr);
-
-		if((nameNodeSocket = accept(listenSocket, (struct sockaddr *) &nameNodeSocketAddr, &nameNodeSocketAddrLen)) <= 0){
-			perror("DATA NODE: Error accepting new connection");
-			close(listenSocket);
-		}
-
 		*packet = EmptyStruct;
-		printf("Waiting for data from name node...");
+		printf("Waiting for request from name node...");
 		if (recv(nameNodeSocket, &(*packet), sizeof(*packet), 0) <= 0){
 			perror("DATA NODE: Error receiving request packet from name node");
 		}
 		printf(" Received packet from name node!\n");
-		chdir(packet->directory);
+		
+		if(chdir(packet->directory) == -1){
+			perror("DATA NODE: Could not change working directory");
+		}
 		strcat(packet->filename, packet->chunkNo); // e.g. testfile.wav4
 		
 		switch(packet->operation){
 		case READ:
 			printf("Read: Reading chunk %s%s... ", packet->directory, packet->filename);
-			fp = fopen(packet->filename, "a+");
-			memset(&tempBuffer[0], 0, sizeof(tempBuffer));
-			if (fread(tempBuffer, CHUNK_SIZE, 1, fp) != CHUNK_SIZE){ // reads chunk from file
-				perror("READ: Error during file reading on data node");
+			if((fp = fopen(packet->filename, "r")) == NULL){
+				perror("READ: File chunk does not exist");
+				strcpy(tempBuffer, "~~");
+				printf("Transmitting NAK to name node... ");
+				if (send(nameNodeSocket, &tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){
+					perror("READ: Error during data node NAK transmission");
+				}
+				printf("Sent!\n");
+				break;
 			}
+			memset(&tempBuffer[0], 0, sizeof(tempBuffer));
+			fread(tempBuffer, CHUNK_SIZE, 1, fp); // reads chunk from file
 			printf("Read!\n");
-			printf("Sending chunk back to name node... ");
+			printf("%s\n", tempBuffer);
+			printf("Sending chunk %s back to name node... ", packet->chunkNo);
 			if (send(nameNodeSocket, &tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){ // sends chunk back to name node
 				perror("READ: Error during chunk transmission from data node");
 			}
-			printf("Sent!\nFinished reading.\n");
+			printf("Sent!\n");
 			fclose(fp);
 			break;
 		case WRITE:
 			printf("Write: Receiving chunk %s%s... ", packet->directory, packet->filename);
-			fp = fopen(packet->filename, "a+");
+			if((fp = fopen(packet->filename, "w")) == NULL){
+				perror("WRITE: File chunk could not be created");
+			}
 			memset(&tempBuffer[0], 0, sizeof(tempBuffer));
 			if (recv(nameNodeSocket, &tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){
 				perror("WRITE: Error during data node chunk reception");
 			}
-			printf("Received data!");
+			printf("Received data!\n");
 			printf("Writing data to chunk... ");
-			fprintf(fp, "%s", tempBuffer); // write chunk
+			if(fprintf(fp, "%s", tempBuffer) < 0){ // write chunk
+				perror("WRITE: Error writing to file chunk");
+			}
 			printf("Written!\n");
 			printf("Sending ACK back to name node... ");
 			if (send(nameNodeSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 				perror("WRITE: Error during data node ACK transmission");
 			}
-			printf("Sent!\nFinished writing.\n");
+			printf("Sent!\n");
 			fclose(fp);
 			break;
 		case RENAME:
@@ -136,7 +154,7 @@ int main(void){
 				if (send(nameNodeSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 					perror("RENAME: Error during data node ACK transmission");
 				}
-				printf("Sent!\nFinished renaming.\n");
+				printf("Sent!\n");
 			}
 			else{
 				printf("Failed to rename!\n");
@@ -144,7 +162,7 @@ int main(void){
 				if (send(nameNodeSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
 					perror("RENAME: Error during data node NAK transmission");
 				}
-				printf("Sent!\nFinished renaming.\n");
+				printf("Sent!\n");
 			}
 			break;
 		case DELETE:
@@ -155,7 +173,7 @@ int main(void){
 				if (send(nameNodeSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 					perror("DELETE: Error during data node ACK transmission");
 				}
-				printf("Sent!\nFinished deleting.\n");
+				printf("Sent!\n");
 			}
 			else{
 				printf("Failed to delete!\n");
@@ -163,19 +181,11 @@ int main(void){
 				if (send(nameNodeSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
 					perror("DELETE: Error during data node NAK transmission");
 				}
-				printf("Sent!\nFinished deleting.\n");
+				printf("Sent!\n");
 			}
 			break;
 		}
 	}
-	
-	if(shutdown(nameNodeSocket, SHUT_RDWR) == -1){
-		perror("DATA NODE: Error shutting down name node socket");
-		close(nameNodeSocket);
-		close(listenSocket);
-		exit(EXIT_FAILURE);
-	}
-	close(nameNodeSocket);
-	close(listenSocket);
+
 	return EXIT_SUCCESS;
 }
