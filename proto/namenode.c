@@ -24,15 +24,15 @@
 #include <unistd.h>
 
 #define NUM_OF_CHUNKS 8
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE 5
 
 #define MY_IP "169.254.0.2"
-#define PERL_PORT 48053
+#define PERL_PORT 48060
 
 #define NUM_OF_DATA_NODES 1
 #define DATA_NODE_IP_1 "169.254.0.1"
 #define DATA_NODE_IP_2 "169.254.0.2"
-#define DATA_NODE_PORT 48010
+#define DATA_NODE_PORT 48011
 
 #define SL 30
 
@@ -74,7 +74,7 @@ typedef struct perlRequestQueue{
 }perlRequestQueue;
 
 
-FILE* readFile(char directory[SL], char filename[SL]);
+void readFile(char directory[SL], char filename[SL], int searchEnabled);
 void writeFile(char username[SL], char directory[SL], char filename[SL]);
 void searchFile(char directory[SL], char filename[SL], char searchTerm[SL]);
 void renameFile(char username[SL], char directory[SL], char filename[SL], char newFilename[SL]);
@@ -138,9 +138,9 @@ int main(void){
 			}
 			
 			switch (request->operation){
-			case READ:
-				readFile(directory, request->filename);
-				break;
+			case READ:{
+				readFile(directory, request->filename, 0);
+				break;}
 			case WRITE:
 				writeFile(request->username, directory, request->filename);
 				break;
@@ -174,7 +174,7 @@ int main(void){
 /*
  * This function retrieves and concatenates file chunks from data nodes
 */
-FILE* readFile(char directory[SL], char filename[SL]){
+void readFile(char directory[SL], char filename[SL], int searchEnabled){
 	nameNodeRequest* reqPacket = (nameNodeRequest*)(malloc (sizeof(nameNodeRequest))); // packet to request data from data node
 	char data[CHUNK_SIZE]; // data from data node
 	int i, currSocket = 0, success = 1;
@@ -194,9 +194,11 @@ FILE* readFile(char directory[SL], char filename[SL]){
 		
 		printf("Receiving file chunk %d from data node %d... ", i, currSocket);
 		memset(&data[0], 0, sizeof(data));
-		if (recv(sockets[currSocket], data, sizeof(data), 0) <= 0){ // receives data chunk back
+		int numBytes;
+		if ((numBytes = recv(sockets[currSocket], data, CHUNK_SIZE, 0)) <= 0){ // receives data chunk back
 			perror("READ: Error while receiving file chunk from data node");
 		}
+		data[numBytes] = '\0';
 		printf("Received!\n");
 		printf("%s\n", data);
 		if (data[0] == '~' && data[1] == '~'){ // file chunk reading error on data node side
@@ -216,15 +218,15 @@ FILE* readFile(char directory[SL], char filename[SL]){
 		currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
 	}
 	
-	if (success){
+	if (success && !searchEnabled){
 		printf("Sending read ACK to Perl... ");
 		if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 			perror("READ: Error during Perl ACK transmission");
 		}
-		printf("Sent!\nFinished reading.\n");
-		fclose(fp);
+		printf("Sent!\nFinished reading.\nWaiting for Perl request... ");
 	}
-	return fp;
+	fclose(fp);
+	free(reqPacket);
 }
 
 /*
@@ -245,9 +247,9 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 	for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are concatenated
 		printf("Creating chunk %d... ", i);
 		memset(&tempBuffer[0], 0, sizeof(tempBuffer));
-		fread(tempBuffer, CHUNK_SIZE, 1, fp); // reads chunk from file
+		fread(tempBuffer, sizeof(tempBuffer), 1, fp); // reads chunk from file
 		printf("File chunk created!\n");
-		
+		printf("%s\n", tempBuffer);
 		printf("Sending write request for chunk %d to data node %d... ", i, currSocket);
 		packet = createPacket(WRITE, directory, filename, "", i);
 		if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends header packet to data node
@@ -256,14 +258,14 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 		printf("Sent!\n");
 		
 		printf("Sending data chunk %d to data node %d... ", i, currSocket);
-		if (send(sockets[currSocket], &tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){ // sends data to data node
+		if (send(sockets[currSocket], tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){ // sends data to data node
 			perror("WRITE: Error during data transmission");
 		}
 		printf("Sent!\n");
 		
 		printf("Waiting for ACK from data node %d... ", currSocket);
 		memset(&ack[0], 0, sizeof(ack));
-		if (recv(sockets[currSocket], &ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
+		if (recv(sockets[currSocket], ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
 			perror("WRITE: Error while waiting for ACK from data node");
 		}
 		printf("Received ACK!\n");
@@ -277,22 +279,43 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 	char period[SL];
 	strcpy(period, per); // initializes period
 	
-	char* fileStructureFileName = strcat(period, username);
-	
-	char fileDir[30];
-	strcpy(fileDir, baseDirectory);
-	if (chdir(strcat(fileDir, username)) < 0){
+	char userFileLoc[50];
+	//strcpy(fileDir, baseDirectory);
+	strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+	strcat(userFileLoc, username);
+	if (chdir(userFileLoc) < 0){
 		perror("WRITE: Error changing directory to user's directory");
 	}
+	
+	char fileStructureFilename[50];
+	strcpy(fileStructureFilename, period);
+	strcat(fileStructureFilename, username);
 	FILE* userFiles;
-	if ((userFiles = fopen(fileStructureFileName, "a+")) < 0){ // open user file structure
+	if ((userFiles = fopen(fileStructureFilename, "a+")) < 0){ // open user file structure
 		perror("WRITE: Error opening user file structure");
 	}
-	if(fprintf(userFiles, "%s\n", strcat(strcat(baseDirectory, directory), filename)) < 0){ // adds new filename to list of files
-		perror("WRITE: Error adding new filename to user file structure");
+	
+	int overwritingOldFile = 0;
+	char temp[512];
+	char newFilepath[50];
+	strcpy(newFilepath, baseDirectory);
+	strcat(newFilepath, directory);
+	strcat(newFilepath, filename);
+	char* strLoc;
+	while(fgets(temp, sizeof(temp), userFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
+		if((strLoc = strstr(temp, newFilepath)) != NULL){ // look for already-existing file
+			printf("...but the filepath is already in the user file structure.  Must be an overwrite.\n");
+			overwritingOldFile = 1;
+		}
+	}
+	
+	if(!overwritingOldFile){
+		if(fprintf(userFiles, "%s\n", newFilepath) < 0){ // adds new filename to list of files
+			perror("WRITE: Error adding new filename to user file structure");
+		}
+		printf("Added!\n");
 	}
 	fclose(userFiles);
-	printf("Added!\n");
 	
 	printf("Sending ACK to Perl... ");
 	if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
@@ -304,7 +327,7 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 	if (remove(filename) != 0){ // Delete file after sending it
 		perror("WRITE: File deletion error");
 	}
-	printf("Deleted!\nFinished writing.\n");
+	printf("Deleted!\nFinished writing.\nWaiting for Perl request... ");
 }
 
 /*
@@ -313,9 +336,12 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 void searchFile(char directory[SL], char filename[SL], char searchTerm[SL]){
 	int lineNum = 0, findResult = 0;
 	char temp[512];
-	FILE* fp = readFile(directory, searchTerm); // gets file pointer to read-in file
+	readFile(directory, filename, 1); // reads in file for searching
+	FILE* fp = fopen(filename, "r"); // gets file pointer to read-in file
 	printf("Searching %s%s for: %s\n", directory, filename, searchTerm);
-	while(fgets(temp, 512, fp) != NULL) { // reads in chunks of 512 bytes and searches for target search term
+	memset(&temp[0], 0, sizeof(temp));
+	
+	while(fgets(temp, sizeof(temp), fp) != NULL) { // reads in chunks of 512 bytes and searches for target search term
 		if((strstr(temp, searchTerm)) != NULL) { // if they are a match, break out and send ACK
 			printf("%s was found!\n", searchTerm);
 			findResult = 1;
@@ -330,15 +356,20 @@ void searchFile(char directory[SL], char filename[SL], char searchTerm[SL]){
 		if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
 			perror("SEARCH: Error during Perl NAK transmission");
 		}
-		printf("Sent!");
+		printf("Sent!\nFinished searching.\nWaiting for Perl request... ");
 	}
 	else{
 		printf("Sending ACK to Perl... ");
 		if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 			perror("SEARCH: Error during Perl ACK transmission");
 		}
-		printf("Sent!");
+		printf("Sent!\n");
 	}
+	printf("Deleting temporary local file... ");
+	if (remove(filename) != 0){ // Delete file after sending it
+		perror("SEARCH: File deletion error");
+	}
+	printf("Deleted!\nFinished searching.\nWaiting for Perl request... ");
 }
 
 /*
@@ -356,9 +387,9 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 		if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends rename request to data node
 			perror("RENAME: Error during rename request transmission to data node");
 		}
-		printf("Sent!");
+		printf("Sent!\n");
 		
-		printf("Waiting for ACK from data node %d... ", currSocket);
+		printf("Waiting for ACK from data node %d... ", currSocket); // TODO: Handle NAKs
 		memset(&ack[0], 0, sizeof(ack));
 		if (recv(sockets[currSocket], &ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
 			perror("RENAME: Error while waiting for ACK from data node");
@@ -374,29 +405,40 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 	char period[SL];
 	strcpy(period, per); // initializes period
 	
-	char* fileStructureFileName = strcat(period, username);
-	
-	char fileDir[30];
-	strcpy(fileDir, baseDirectory);
-	if(chdir(strcat(fileDir, username)) < 0){
+	char userFileLoc[50];
+	//strcpy(fileDir, baseDirectory);
+	strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+	strcat(userFileLoc, username);
+	if (chdir(userFileLoc) < 0){
 		perror("RENAME: Error changing directory to user's directory");
 	}
+	
+	char* fileStructureFileName = strcat(period, username);
 	FILE* oldUserFiles;
-	if ((oldUserFiles = fopen(fileStructureFileName, "a+")) < 0){ // open user file structure
+	if ((oldUserFiles = fopen(fileStructureFileName, "r")) < 0){ // open user file structure
 		perror("RENAME: Error opening old file structure file");
 	}
 	FILE* newUserFiles;
 	if ((newUserFiles = fopen("tempfile.txt", "w")) < 0){ // open new file for copying over to
 		perror("RENAME: Error opening new user file structure file");
 	}
-	if (fprintf(newUserFiles, "%s\n", strcat(strcat(baseDirectory, directory), newFilename)) < 0){ // adds new filename to list of files
+	
+	char oldFilepath[50];
+	strcpy(oldFilepath, baseDirectory);
+	strcat(oldFilepath, directory);
+	strcat(oldFilepath, filename);
+	char newFilepath[50];
+	strcpy(newFilepath, baseDirectory);
+	strcat(newFilepath, directory);
+	strcat(newFilepath, newFilename);
+	if (fprintf(newUserFiles, "%s\n", newFilepath) < 0){ // adds new filename to list of files
 		perror("RENAME: Error adding new filename to new user file structure file");
 	}
 	
 	char temp[512];
 	char* strLoc;
-	while(fgets(temp, 512, oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
-		if((strLoc = strstr(temp, filename)) == NULL){ // copy everything but old filename
+	while(fgets(temp, sizeof(temp), oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
+		if((strLoc = strstr(temp, oldFilepath)) == NULL){ // copy everything but old filename
 			if(fprintf(newUserFiles, "%s", temp) < 0){
 				perror("RENAME: Error copying over file structure");
 			}
@@ -418,7 +460,7 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 	if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 		perror("RENAME: Error during Perl ACK transmission");
 	}
-	printf("Sent!\nFinished renaming.\n");
+	printf("Sent!\nFinished renaming.\nWaiting for Perl request... ");
 }
 
 /*
@@ -432,7 +474,7 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 	int currSocket = 0, i;
 	for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are deleted
 		printf("Requesting deletion of file chunk %d on data node %d... ", i, currSocket);
-		packet = createPacket(DELETE, directory, filename, NULL, i); // sets up request packet
+		packet = createPacket(DELETE, directory, filename, "", i); // sets up request packet
 		if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends delete request to data node
 			perror("DELETE: Error during delete request transmission to data node");
 		}
@@ -454,24 +496,35 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 	char period[SL];
 	strcpy(period, per); // initializes period
 	
-	char* fileStructureFileName = strcat(period, username);
+	char userFileLoc[50];
+	//strcpy(fileDir, baseDirectory);
+	strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+	strcat(userFileLoc, username);
+	if (chdir(userFileLoc) < 0){
+		perror("RENAME: Error changing directory to user's directory");
+	}
 	
-	chdir(strcat(baseDirectory, username));
+	char* fileStructureFileName = strcat(period, username);
 	FILE* oldUserFiles;
-	if ((oldUserFiles = fopen(fileStructureFileName, "a+")) < 0){ // open user file structure
-		perror("DELETE: Error opening old user file structure file");
+	if ((oldUserFiles = fopen(fileStructureFileName, "r")) < 0){ // open user file structure
+		perror("RENAME: Error opening old file structure file");
 	}
 	FILE* newUserFiles;
 	if ((newUserFiles = fopen("tempfile.txt", "w")) < 0){ // open new file for copying over to
-		perror("DELETE: Error opening new user file structure file");
+		perror("RENAME: Error opening new user file structure file");
 	}
+	
+	char oldFilepath[50];
+	strcpy(oldFilepath, baseDirectory);
+	strcat(oldFilepath, directory);
+	strcat(oldFilepath, filename);
 	
 	char temp[512];
 	char* strLoc;
-	while(fgets(temp, 512, oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
-		if((strLoc = strstr(temp, filename)) == NULL){ // copy everything but old filename
-			if (fprintf(newUserFiles, "%s", temp) < 0){
-				perror("DELETE: Error copying over old file structure");
+	while(fgets(temp, sizeof(temp), oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
+		if((strLoc = strstr(temp, oldFilepath)) == NULL){ // copy everything but old filename
+			if(fprintf(newUserFiles, "%s", temp) < 0){
+				perror("RENAME: Error copying over file structure");
 			}
 		}
 	}
@@ -480,7 +533,7 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 		perror("DELETE: Error removing old file structure file");
 	}
 	if (rename("tempfile.txt", fileStructureFileName) != 0){
-		perror("DELETE Error renaming new file structure file to original name");
+		perror("DELETE: Error renaming new file structure file to original name");
 	}
 	
 	fclose(oldUserFiles);
@@ -491,7 +544,7 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 	if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 		perror("DELETE: Error during Perl ACK transmission");
 	}
-	printf("Sent!\nFinished deleting.\n");
+	printf("Sent!\nFinished deleting.\nWaiting for Perl request... ");
 }
 
 /*
