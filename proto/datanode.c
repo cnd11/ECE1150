@@ -17,8 +17,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DATA_NODE_PORT 48010
-#define CHUNK_SIZE 1024
+#define DATA_NODE_PORT 48011
+#define CHUNK_SIZE 5
 #define MY_IP "169.254.0.2"
 
 typedef enum {
@@ -37,15 +37,12 @@ typedef struct nameNodeRequest{
 	char chunkNo[3];
 } nameNodeRequest;
 
-const char* ackPacket; // ACK and NAK packets
-const char* nakPacket;
-
 int main(void){
 	int nameNodeSocket = -1, listenSocket = -1;
 	FILE* fp;
 	
-	ackPacket = "ok";
-	nakPacket = "no";
+	char ackPacket[2] = "ok";
+	char nakPacket[2] = "no";
 	static const nameNodeRequest EmptyStruct; // empty structure used for clearing structs
 	
 	printf("Creating data node listen socket... ");
@@ -106,18 +103,18 @@ int main(void){
 				perror("READ: File chunk does not exist");
 				strcpy(tempBuffer, "~~");
 				printf("Transmitting NAK to name node... ");
-				if (send(nameNodeSocket, &tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){
+				if (send(nameNodeSocket, tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){
 					perror("READ: Error during data node NAK transmission");
 				}
 				printf("Sent!\n");
 				break;
 			}
 			memset(&tempBuffer[0], 0, sizeof(tempBuffer));
-			fread(tempBuffer, CHUNK_SIZE, 1, fp); // reads chunk from file
+			fread(tempBuffer, sizeof(tempBuffer), 1, fp); // reads chunk from file
 			printf("Read!\n");
 			printf("%s\n", tempBuffer);
 			printf("Sending chunk %s back to name node... ", packet->chunkNo);
-			if (send(nameNodeSocket, &tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){ // sends chunk back to name node
+			if (send(nameNodeSocket, tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){ // sends chunk back to name node
 				perror("READ: Error during chunk transmission from data node");
 			}
 			printf("Sent!\n");
@@ -129,7 +126,7 @@ int main(void){
 				perror("WRITE: File chunk could not be created");
 			}
 			memset(&tempBuffer[0], 0, sizeof(tempBuffer));
-			if (recv(nameNodeSocket, &tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){
+			if (recv(nameNodeSocket, tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){
 				perror("WRITE: Error during data node chunk reception");
 			}
 			printf("Received data!\n");
@@ -139,14 +136,14 @@ int main(void){
 			}
 			printf("Written!\n");
 			printf("Sending ACK back to name node... ");
-			if (send(nameNodeSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
+			if (send(nameNodeSocket, ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 				perror("WRITE: Error during data node ACK transmission");
 			}
 			printf("Sent!\n");
 			fclose(fp);
 			break;
 		case RENAME:
-			printf("Renaming file %s to %s... ", packet->filename, packet->newFilename);
+			printf("Renaming file %s to %s%s... ", packet->filename, packet->newFilename, packet->chunkNo);
 			strcat(packet->newFilename, packet->chunkNo);
 			if(rename(packet->filename, packet->newFilename) == 0){
 				printf("Renamed!\n");
