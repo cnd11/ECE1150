@@ -1,5 +1,5 @@
 /*
-* This program performs the duties of the NameNode on the distributed file system.
+* This program performs the duties of the master name node on the distributed file system.
 * Written by Ben Kisley, 11/1/13
 */
 
@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -27,7 +28,7 @@
 #define CHUNK_SIZE 5
 
 #define MY_IP "169.254.0.2"
-#define PERL_PORT 48060
+#define PERL_PORT 48066
 
 #define NUM_OF_DATA_NODES 1
 #define DATA_NODE_IP_1 "169.254.0.1"
@@ -38,7 +39,7 @@
 
 typedef char* string;
 
-typedef enum{
+typedef enum{ // operation request type
 	READ,
 	WRITE,
 	SEARCH,
@@ -46,21 +47,21 @@ typedef enum{
 	DELETE
 } reqType;
 
-typedef struct nameNodeRequest{
-	reqType operation;
-	char directory[SL];
-	char filename[SL];
-	char newFilename[SL];
-	char chunkNo[3];;
+typedef struct nameNodeRequest{ // request sent to data node from name node
+	reqType operation; // requested operation
+	char directory[SL]; // directory of file
+	char filename[SL]; // name of file
+	char newFilename[SL]; // optional new filename
+	char chunkNo[3]; // requested chunk number
 } nameNodeRequest;
 
-typedef struct perlRequest{
-	reqType operation;
-	char directory[SL];
-	char filename[SL];
-	char username[SL];
-	char searchTerm[SL];
-	char newFilename[SL];
+typedef struct perlRequest{ // request from Perl program
+	reqType operation; // requested operation
+	char directory[SL]; // directory of file
+	char filename[SL]; // name of file
+	char username[SL]; // user's username
+	char searchTerm[SL]; // optional search term
+	char newFilename[SL]; // optional new filename
 } perlRequest;
 
 typedef struct perlRequestQueue{
@@ -74,15 +75,13 @@ typedef struct perlRequestQueue{
 }perlRequestQueue;
 
 
-void readFile(char directory[SL], char filename[SL], int searchEnabled);
+int readFile(char directory[SL], char filename[SL], int searchEnabled);
 void writeFile(char username[SL], char directory[SL], char filename[SL]);
 void searchFile(char directory[SL], char filename[SL], char searchTerm[SL]);
 void renameFile(char username[SL], char directory[SL], char filename[SL], char newFilename[SL]);
 void deleteFile(string username, char directory[SL], char filename[SL]);
-
 void *perlListener(void* ptr);
 int dataNodeConnector(char* dataNodeIP);
-
 nameNodeRequest* createPacket(reqType type, char dr[SL], char fn[SL], char nf[SL], int chunkNo);
 perlRequestQueue* createQueue();
 perlRequest* Dequeue(perlRequestQueue* Q);
@@ -99,16 +98,18 @@ int numOfSockets = 0; // number of currently connected data nodes
 static const nameNodeRequest EmptyStruct; // empty structure used for clearing structs
 const char* ackPacket; // ACK and NAK packets
 const char* nakPacket;
+const char* fldPacket; // failed packet -- notifies Perl if a search term was not found
 const char* baseDir; // base directory of filesystem
 
 int main(void){
 	perlRequest* request;
-	int operation, errFlag;
-	char directory[SL];
+	int operation, errFlag, success = 1;
+	char directory[SL]; // current working directory
 	FILE* fp;
-	ackPacket = "ok";
+	ackPacket = "ok"; // sets of ACK and NAK packets
 	nakPacket = "no";
-	//baseDir = "/var/www/data/";
+	fldPacket = "fd";
+	//baseDir = "/var/www/data/"; // sets up base directory of filesystem
 	baseDir = "/";
 	
 	printf("Establishing connection to Perl program...\n");
@@ -120,113 +121,135 @@ int main(void){
 	/*while (errFlag != 0){ // wait for connection to be established to data nodes
 		errFlag = dataNodeConnector(DATA_NODE_IP_1) + dataNodeConnector(DATA_NODE_IP_2);
 	}*/
-	dataNodeConnector(DATA_NODE_IP_2);
+	dataNodeConnector(DATA_NODE_IP_2); // TEMP DEBUGGING CONDITION
 	
 	while(1){ // Main loop -- Dequeue requests as they come in and process them
 		if (Q->size != 0){
 			printf("New request from Perl\n");
 			request = Dequeue(Q);
-			if (request->operation == -1){
-				perror("NAME NODE: Request queue is full");
-			}
 			
 			memset(&directory[0], 0, sizeof(directory));
 			strcpy(directory, baseDir); // change directory
 			strcat(directory, request->directory);
+			struct stat st = {0};
+			if (stat(directory, &st) == -1){ // check if directory exists
+				mkdir(directory, 0777); // if it doesn't, create it
+			}
 			if(chdir(directory) == -1){
 				perror("NAME NODE: Error changing working directory");
+				printf("Sending NAK packet to Perl... ");
+				if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
+					perror("NAME NODE: Error during Perl NAK transmission");
+				}
+				printf("Sent!\n");
+				success = 0;
 			}
-			
-			switch (request->operation){
-			case READ:{
-				readFile(directory, request->filename, 0);
-				break;}
-			case WRITE:
-				writeFile(request->username, directory, request->filename);
-				break;
-			case SEARCH:
-				searchFile(directory, request->filename, request->searchTerm);
-				break;
-			case RENAME:
-				renameFile(request->username, directory, request->filename, request->newFilename);
-				break;
-			case DELETE:
-				deleteFile(request->username, directory, request->filename);
-				break;
+			else{
+				success = 1;
+			}
+			if (success){
+				switch (request->operation){
+				case READ:{
+					readFile(directory, request->filename, 0);
+					break;}
+				case WRITE:
+					writeFile(request->username, directory, request->filename);
+					break;
+				case SEARCH:
+					searchFile(directory, request->filename, request->searchTerm);
+					break;
+				case RENAME:
+					renameFile(request->username, directory, request->filename, request->newFilename);
+					break;
+				case DELETE:
+					deleteFile(request->username, directory, request->filename);
+					break;
+				}
 			}
 		}
 	}
-	
-	// int err = dataNodeConnector(DATA_NODE_IP_2);
-	// if (err == 0){
-		// printf("Failed to connect to data node\n");
-	// }
-	// nameNodeRequest* packet;
-	// packet->operation = WRITE;
-	// packet->chunkNo = 6;
-	// strcpy(packet->directory, "benadsfasdf");
-	// strcpy(packet->filename, "wandoadsfasfdf.mp3");
-	// send(sockets[0], &(*packet), sizeof(*packet), 0);
-	
 	return(0);
 }
 
 /*
  * This function retrieves and concatenates file chunks from data nodes
 */
-void readFile(char directory[SL], char filename[SL], int searchEnabled){
+int readFile(char directory[SL], char filename[SL], int searchEnabled){
 	nameNodeRequest* reqPacket = (nameNodeRequest*)(malloc (sizeof(nameNodeRequest))); // packet to request data from data node
 	char data[CHUNK_SIZE]; // data from data node
 	int i, currSocket = 0, success = 1;
 	FILE* fp;
 	
-	if((fp = fopen(filename, "w")) < 0){ // and open file
-		perror("READ: Error opening file on name node");
-	}
-	printf("Reading file %s%s from data nodes.\n", directory, filename);
-	for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are concatenated
-		reqPacket = createPacket(READ, directory, filename, "", i);
-		printf("Sending read request packet for chunk %d... ", i);
-		if (send(sockets[currSocket], &(*reqPacket), sizeof(*reqPacket), 0) <= 0){ // sends request to data node
-			perror("READ: Error sending data chunk request to data node");
-		}
-		printf("Sent!\n");
-		
-		printf("Receiving file chunk %d from data node %d... ", i, currSocket);
-		memset(&data[0], 0, sizeof(data));
-		int numBytes;
-		if ((numBytes = recv(sockets[currSocket], data, CHUNK_SIZE, 0)) <= 0){ // receives data chunk back
-			perror("READ: Error while receiving file chunk from data node");
-		}
-		data[numBytes] = '\0';
-		printf("Received!\n");
-		printf("%s\n", data);
-		if (data[0] == '~' && data[1] == '~'){ // file chunk reading error on data node side
+	while (success){
+		if((fp = fopen(filename, "w")) < 0){ // and open file
+			perror("READ: Error opening file on name node");
 			success = 0;
-			printf("Data chunk %d not found.\nSending read NAK to Perl... ", i);
+			break;
+		}
+		printf("Reading file %s%s from data nodes.\n", directory, filename);
+		for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are concatenated
+			reqPacket = createPacket(READ, directory, filename, "", i);
+			printf("Sending read request packet for chunk %d... ", i);
+			if (send(sockets[currSocket], &(*reqPacket), sizeof(*reqPacket), 0) <= 0){ // sends request to data node
+				perror("READ: Error sending data chunk request to data node");
+				success = 0;
+				break;
+			}
+			printf("Sent!\n");
+			
+			printf("Receiving file chunk %d from data node %d... ", i, currSocket);
+			memset(&data[0], 0, sizeof(data));
+			int numBytes;
+			if ((numBytes = recv(sockets[currSocket], data, CHUNK_SIZE, 0)) <= 0){ // receives data chunk back
+				perror("READ: Error while receiving file chunk from data node");
+				success = 0;
+				break;
+			}
+			data[numBytes] = '\0';
+			printf("Received!\n");
+			printf("%s\n", data);
+			if (data[0] == '~' && data[1] == '~'){ // file chunk reading error on data node side
+				printf("Data chunk %d not found.\n", i);
+				success = 0;
+				break;
+			}
+			printf("Writing chunk %d to file\n", i);
+			if(fprintf(fp, "%s", data) < 0){ // concatenates data chunk to file
+				perror("READ: Error writing chunk to local file");
+				success = 0;
+				break;
+			}
+			
+			currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
+		}
+		break;
+	}
+	
+	if (success){
+		if (!searchEnabled){
+			printf("Sending read ACK to Perl... ");
+			if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
+				perror("READ: Error during Perl ACK transmission");
+			}
+			printf("Sent!\nFinished reading.\nWaiting for Perl request... ");
+		}
+		fclose(fp);
+		free(reqPacket);
+		return 1;
+	}
+	else{
+		if (!searchEnabled){
+			printf("Sending read NAK to Perl... ");
 			if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
 				perror("READ: Error during Perl NAK transmission");
 			}
-			printf("Sent!\nRead failed.\n");
-			break;
+			printf("Sent!\nReading failed.\nWaiting for Perl request... ");
 		}
-		printf("Writing chunk %d to file\n", i);
-		if(fprintf(fp, "%s", data) < 0){ // concatenates data chunk to file
-			perror("READ: Error writing chunk to local file");
-		}
-		
-		currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
+		fclose(fp);
+		free(reqPacket);
+		return 0;
 	}
 	
-	if (success && !searchEnabled){
-		printf("Sending read ACK to Perl... ");
-		if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
-			perror("READ: Error during Perl ACK transmission");
-		}
-		printf("Sent!\nFinished reading.\nWaiting for Perl request... ");
-	}
-	fclose(fp);
-	free(reqPacket);
 }
 
 /*
@@ -237,139 +260,200 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 	nameNodeRequest* packet; // packet to send to data node
 	char ack[2]; // ACK packet from data node
 	FILE* fp;
+	int success = 1;
 	
-	if((fp = fopen(filename, "r")) < 0){ // and open file
-		perror("WRITE: Error opening file");
-	}
-	
-	printf("Writing file %s%s to data nodes.\n", directory, filename);
-	int currSocket = 0, i;
-	for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are concatenated
-		printf("Creating chunk %d... ", i);
-		memset(&tempBuffer[0], 0, sizeof(tempBuffer));
-		fread(tempBuffer, sizeof(tempBuffer), 1, fp); // reads chunk from file
-		printf("File chunk created!\n");
-		printf("%s\n", tempBuffer);
-		printf("Sending write request for chunk %d to data node %d... ", i, currSocket);
-		packet = createPacket(WRITE, directory, filename, "", i);
-		if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends header packet to data node
-			perror("WRITE: Error during header transmission");
+	while (success == 1){
+		if((fp = fopen(filename, "r")) == NULL){ // and open file
+			perror("WRITE: Error opening file");
+			success = 0;
+			break;
 		}
-		printf("Sent!\n");
 		
-		printf("Sending data chunk %d to data node %d... ", i, currSocket);
-		if (send(sockets[currSocket], tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){ // sends data to data node
-			perror("WRITE: Error during data transmission");
+		printf("Writing file %s%s to data nodes.\n", directory, filename);
+		int currSocket = 0, i;
+		for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are concatenated
+			printf("Creating chunk %d... ", i);
+			memset(&tempBuffer[0], 0, sizeof(tempBuffer));
+			fread(tempBuffer, sizeof(tempBuffer), 1, fp); // reads chunk from file
+			printf("File chunk created!\n");
+			printf("%s\n", tempBuffer);
+			printf("Sending write request for chunk %d to data node %d... ", i, currSocket);
+			packet = createPacket(WRITE, directory, filename, "", i);
+			if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends header packet to data node
+				perror("WRITE: Error during header transmission");
+				success = 0;
+				break;
+			}
+			printf("Sent!\n");
+			
+			printf("Sending data chunk %d to data node %d... ", i, currSocket);
+			if (send(sockets[currSocket], tempBuffer, sizeof(tempBuffer)/sizeof(char), 0) <= 0){ // sends data to data node
+				perror("WRITE: Error during data transmission");
+				success = 0;
+				break;
+			}
+			printf("Sent!\n");
+			
+			printf("Waiting for ACK from data node %d... ", currSocket);
+			memset(&ack[0], 0, sizeof(ack));
+			if (recv(sockets[currSocket], ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
+				perror("WRITE: Error while waiting for ACK from data node");
+				success = 0;
+				break;
+			}
+			printf("Received ACK!\n");
+			if (ack[0] == 'n' && ack[1] == 'o'){ // NAK packet has been received
+				printf("NAK received from data node\n");
+				success = 0;
+				break;
+			}
+			currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
 		}
-		printf("Sent!\n");
+		if (success == 0){
+			break; // not sure why this is necessary, but C is dumb
+		}
 		
-		printf("Waiting for ACK from data node %d... ", currSocket);
-		memset(&ack[0], 0, sizeof(ack));
-		if (recv(sockets[currSocket], ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
-			perror("WRITE: Error while waiting for ACK from data node");
+		printf("Adding new file to user's file structure... ");
+		char baseDirectory[SL];
+		strcpy(baseDirectory, baseDir); // initializes directory prefix
+		char per[] = ".";
+		char period[SL];
+		strcpy(period, per); // initializes period
+		
+		char userFileLoc[50];
+		//strcpy(fileDir, baseDirectory);
+		strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+		strcat(userFileLoc, username);
+		
+		struct stat st = {0};
+		if (stat(userFileLoc, &st) == -1){ // check if directory exists
+			mkdir(userFileLoc, 0777); // if it doesn't, create it
 		}
-		printf("Received ACK!\n");
-		currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
-	}
-	
-	printf("Adding new file to user's file structure... ");
-	char baseDirectory[SL];
-	strcpy(baseDirectory, baseDir); // initializes directory prefix
-	char per[] = ".";
-	char period[SL];
-	strcpy(period, per); // initializes period
-	
-	char userFileLoc[50];
-	//strcpy(fileDir, baseDirectory);
-	strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
-	strcat(userFileLoc, username);
-	if (chdir(userFileLoc) < 0){
-		perror("WRITE: Error changing directory to user's directory");
-	}
-	
-	char fileStructureFilename[50];
-	strcpy(fileStructureFilename, period);
-	strcat(fileStructureFilename, username);
-	FILE* userFiles;
-	if ((userFiles = fopen(fileStructureFilename, "a+")) < 0){ // open user file structure
-		perror("WRITE: Error opening user file structure");
-	}
-	
-	int overwritingOldFile = 0;
-	char temp[512];
-	char newFilepath[50];
-	strcpy(newFilepath, baseDirectory);
-	strcat(newFilepath, directory);
-	strcat(newFilepath, filename);
-	char* strLoc;
-	while(fgets(temp, sizeof(temp), userFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
-		if((strLoc = strstr(temp, newFilepath)) != NULL){ // look for already-existing file
-			printf("...but the filepath is already in the user file structure.  Must be an overwrite.\n");
-			overwritingOldFile = 1;
+		if (chdir(userFileLoc) < 0){
+			perror("WRITE: Error changing directory to user's directory");
+			success = 0;
+			break;
 		}
-	}
-	
-	if(!overwritingOldFile){
-		if(fprintf(userFiles, "%s\n", newFilepath) < 0){ // adds new filename to list of files
-			perror("WRITE: Error adding new filename to user file structure");
+		
+		char fileStructureFilename[50];
+		strcpy(fileStructureFilename, period);
+		strcat(fileStructureFilename, username);
+		FILE* userFiles;
+		if ((userFiles = fopen(fileStructureFilename, "a+")) < 0){ // open user file structure
+			perror("WRITE: Error opening user file structure");
+			success = 0;
+			break;
 		}
-		printf("Added!\n");
+		
+		int overwritingOldFile = 0;
+		char temp[512];
+		char newFilepath[50];
+		strcpy(newFilepath, baseDirectory);
+		strcat(newFilepath, directory);
+		strcat(newFilepath, filename);
+		char* strLoc;
+		while(fgets(temp, sizeof(temp), userFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
+			if((strLoc = strstr(temp, newFilepath)) != NULL){ // look for already-existing file
+				printf("...but the filepath is already in the user file structure.  Must be an overwrite.\n");
+				overwritingOldFile = 1;
+			}
+		}
+		
+		if(!overwritingOldFile){
+			if(fprintf(userFiles, "%s\n", newFilepath) < 0){ // adds new filename to list of files
+				perror("WRITE: Error adding new filename to user file structure");
+				success = 0;
+				break;
+			}
+			printf("Added!\n");
+		}
+		fclose(userFiles);
+		
+		printf("Deleting temporary local file... ");
+		if (remove(filename) != 0){ // Delete file after sending it
+			perror("WRITE: File deletion error");
+			success = 0;
+			break;
+		}
+		printf("Deleted!\nFinished writing.\nWaiting for Perl request... ");
+		break;
 	}
-	fclose(userFiles);
 	
-	printf("Sending ACK to Perl... ");
-	if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
-		perror("WRITE: Error during Perl ACK transmission");
+	if (success){
+		printf("Sending ACK to Perl... ");
+		if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
+			perror("WRITE: Error during Perl ACK transmission");
+		}
+		printf("Sent!\nFinished writing.\nWaiting for Perl request... ");
 	}
-	printf("Sent!\n");
-	
-	printf("Deleting temporary local file... ");
-	if (remove(filename) != 0){ // Delete file after sending it
-		perror("WRITE: File deletion error");
+	else{
+		printf("Sending NAK to Perl... ");
+		if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
+			perror("WRITE: Error during Perl NAK transmission");
+		}
+		printf("Sent!\nWriting failed.\nWaiting for Perl request... ");
 	}
-	printf("Deleted!\nFinished writing.\nWaiting for Perl request... ");
 }
 
 /*
  * This function searches a read-in file for a desired string
 */
 void searchFile(char directory[SL], char filename[SL], char searchTerm[SL]){
-	int lineNum = 0, findResult = 0;
+	int lineNum = 0, findResult = 0, success = 1;
 	char temp[512];
-	readFile(directory, filename, 1); // reads in file for searching
-	FILE* fp = fopen(filename, "r"); // gets file pointer to read-in file
-	printf("Searching %s%s for: %s\n", directory, filename, searchTerm);
-	memset(&temp[0], 0, sizeof(temp));
+	success = readFile(directory, filename, 1); // reads in file for searching
 	
-	while(fgets(temp, sizeof(temp), fp) != NULL) { // reads in chunks of 512 bytes and searches for target search term
-		if((strstr(temp, searchTerm)) != NULL) { // if they are a match, break out and send ACK
-			printf("%s was found!\n", searchTerm);
-			findResult = 1;
+	while (success){
+		FILE* fp;
+		if ((fp = fopen(filename, "r")) < 0){ // gets file pointer to read-in file
+			perror("SEARCH: Error opening file");
+			success = 0;
 			break;
 		}
-		lineNum++;
+		printf("Searching %s%s for: %s\n", directory, filename, searchTerm);
+		memset(&temp[0], 0, sizeof(temp));
+		
+		while(fgets(temp, sizeof(temp), fp) != NULL) { // reads in chunks of 512 bytes and searches for target search term
+			if((strstr(temp, searchTerm)) != NULL) { // if they are a match, break out and send ACK
+				printf("%s was found!\n", searchTerm);
+				findResult = 1;
+				break;
+			}
+			lineNum++;
+		}
+		
+		printf("Deleting temporary local file... ");
+		if (remove(filename) != 0){ // Delete file after sending it
+			perror("SEARCH: File deletion error");
+			success = 0;
+			break;
+		}
+		printf("Deleted!\n");
+		break;
 	}
 
-	if(findResult != 1){
+	if(findResult != 1 && success){
 		printf("%s was NOT found.\n", searchTerm);
-		printf("Sending NAK to Perl... ");
-		if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
+		printf("Sending FLD to Perl... ");
+		if (send(perlSocket, &fldPacket, sizeof(fldPacket)/sizeof(char), 0) <= 0){
 			perror("SEARCH: Error during Perl NAK transmission");
 		}
 		printf("Sent!\nFinished searching.\nWaiting for Perl request... ");
 	}
-	else{
+	else if (findResult == 1 && success){
 		printf("Sending ACK to Perl... ");
 		if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 			perror("SEARCH: Error during Perl ACK transmission");
 		}
-		printf("Sent!\n");
+		printf("Sent!\nFinished searching.\nWaiting for Perl request... ");
 	}
-	printf("Deleting temporary local file... ");
-	if (remove(filename) != 0){ // Delete file after sending it
-		perror("SEARCH: File deletion error");
+	else if (!success){
+		printf("Sending NAK to Perl... ");
+		if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
+			perror("SEARCH: Error during Perl NAK transmission");
+		}
+		printf("Sent!\nSearch failed.\nWaiting for Perl request... ");
 	}
-	printf("Deleted!\nFinished searching.\nWaiting for Perl request... ");
 }
 
 /*
@@ -378,89 +462,135 @@ void searchFile(char directory[SL], char filename[SL], char searchTerm[SL]){
 void renameFile(char username[SL], char directory[SL], char filename[SL], char newFilename[SL]){
 	nameNodeRequest* packet; // packet to send to data node
 	char ack[2]; // ACK packet from data node
+	int success = 1;
 	
-	printf("Renaming file %s%s to %s\n", directory, filename, newFilename);
-	int currSocket = 0, i;
-	for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are renamed
-		packet = createPacket(RENAME, directory, filename, newFilename, i); // sets up request packet
-		printf("Sending rename request for chunk %d to data node %d... ", i, currSocket);
-		if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends rename request to data node
-			perror("RENAME: Error during rename request transmission to data node");
+	while (success){
+		printf("Renaming file %s%s to %s\n", directory, filename, newFilename);
+		int currSocket = 0, i;
+		for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are renamed
+			packet = createPacket(RENAME, directory, filename, newFilename, i); // sets up request packet
+			printf("Sending rename request for chunk %d to data node %d... ", i, currSocket);
+			if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends rename request to data node
+				perror("RENAME: Error during rename request transmission to data node");
+				success = 0;
+				break;
+			}
+			printf("Sent!\n");
+			
+			printf("Waiting for ACK from data node %d... ", currSocket); // TODO: Handle NAKs
+			memset(&ack[0], 0, sizeof(ack));
+			if (recv(sockets[currSocket], &ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
+				perror("RENAME: Error while waiting for ACK from data node");
+				success = 0;
+				break;
+			}
+			printf("Received!\n");
+			if (ack[0] == 'n' && ack[1] == 'o'){ // NAK packet has been received
+				printf("NAK received from data node\n");
+				success = 0;
+				break;
+			}
+			currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
 		}
-		printf("Sent!\n");
+		if (success == 0){
+			break; // not sure why this is necessary, but C is dumb
+		}
 		
-		printf("Waiting for ACK from data node %d... ", currSocket); // TODO: Handle NAKs
-		memset(&ack[0], 0, sizeof(ack));
-		if (recv(sockets[currSocket], &ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
-			perror("RENAME: Error while waiting for ACK from data node");
+		printf("Modifying user's file structure... ");
+		char baseDirectory[SL];
+		strcpy(baseDirectory, baseDir); // initializes directory prefix
+		char per[] = ".";
+		char period[SL];
+		strcpy(period, per); // initializes period
+		
+		char userFileLoc[50];
+		//strcpy(fileDir, baseDirectory);
+		strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+		strcat(userFileLoc, username);
+		struct stat st = {0};
+		if (stat(userFileLoc, &st) == -1){ // check if directory exists
+			mkdir(userFileLoc, 0777); // if it doesn't, create it
 		}
-		printf("Received!\n");
-		currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
-	}
-	
-	printf("Modifying user's file structure... ");
-	char baseDirectory[SL];
-	strcpy(baseDirectory, baseDir); // initializes directory prefix
-	char per[] = ".";
-	char period[SL];
-	strcpy(period, per); // initializes period
-	
-	char userFileLoc[50];
-	//strcpy(fileDir, baseDirectory);
-	strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
-	strcat(userFileLoc, username);
-	if (chdir(userFileLoc) < 0){
-		perror("RENAME: Error changing directory to user's directory");
-	}
-	
-	char* fileStructureFileName = strcat(period, username);
-	FILE* oldUserFiles;
-	if ((oldUserFiles = fopen(fileStructureFileName, "r")) < 0){ // open user file structure
-		perror("RENAME: Error opening old file structure file");
-	}
-	FILE* newUserFiles;
-	if ((newUserFiles = fopen("tempfile.txt", "w")) < 0){ // open new file for copying over to
-		perror("RENAME: Error opening new user file structure file");
-	}
-	
-	char oldFilepath[50];
-	strcpy(oldFilepath, baseDirectory);
-	strcat(oldFilepath, directory);
-	strcat(oldFilepath, filename);
-	char newFilepath[50];
-	strcpy(newFilepath, baseDirectory);
-	strcat(newFilepath, directory);
-	strcat(newFilepath, newFilename);
-	if (fprintf(newUserFiles, "%s\n", newFilepath) < 0){ // adds new filename to list of files
-		perror("RENAME: Error adding new filename to new user file structure file");
-	}
-	
-	char temp[512];
-	char* strLoc;
-	while(fgets(temp, sizeof(temp), oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
-		if((strLoc = strstr(temp, oldFilepath)) == NULL){ // copy everything but old filename
-			if(fprintf(newUserFiles, "%s", temp) < 0){
-				perror("RENAME: Error copying over file structure");
+		if (chdir(userFileLoc) < 0){
+			perror("RENAME: Error changing directory to user's directory");
+			success = 0;
+			break;
+		}
+		
+		char* fileStructureFileName = strcat(period, username);
+		FILE* oldUserFiles;
+		if ((oldUserFiles = fopen(fileStructureFileName, "r")) < 0){ // open user file structure
+			perror("RENAME: Error opening old file structure file");
+			success = 0;
+			break;
+		}
+		FILE* newUserFiles;
+		if ((newUserFiles = fopen("tempfile.txt", "w")) < 0){ // open new file for copying over to
+			perror("RENAME: Error opening new user file structure file");
+			success = 0;
+			break;
+		}
+		
+		char oldFilepath[50];
+		strcpy(oldFilepath, baseDirectory);
+		strcat(oldFilepath, directory);
+		strcat(oldFilepath, filename);
+		char newFilepath[50];
+		strcpy(newFilepath, baseDirectory);
+		strcat(newFilepath, directory);
+		strcat(newFilepath, newFilename);
+		if (fprintf(newUserFiles, "%s\n", newFilepath) < 0){ // adds new filename to list of files
+			perror("RENAME: Error adding new filename to new user file structure file");
+			success = 0;
+			break;
+		}
+		
+		char temp[512];
+		char* strLoc;
+		while(fgets(temp, sizeof(temp), oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
+			if((strLoc = strstr(temp, oldFilepath)) == NULL){ // copy everything but old filename
+				if(fprintf(newUserFiles, "%s", temp) < 0){
+					perror("RENAME: Error copying over file structure");
+					success = 0;
+					break;
+				}
 			}
 		}
+		if (success = 0){
+			break;
+		}
+		
+		if (remove(fileStructureFileName) < 0){ // finishes file rename by overwriting old file structure
+			perror("RENAME: Error deleting old file structure");
+			success = 0;
+			break;
+		}
+		if (rename("tempfile.txt", fileStructureFileName) != 0){
+			perror("RENAME: Error renaming new file structure to original name");
+			success = 0;
+			break;
+		}
+		
+		fclose(oldUserFiles);
+		fclose(newUserFiles);
+		printf("Modified!\n");
+		break;
 	}
 	
-	if (remove(fileStructureFileName) < 0){ // finishes file rename by overwriting old file structure
-		perror("RENAME: Error deleting old file structure");
+	if (success){
+		printf("Sending ACK to Perl... ");
+		if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
+			perror("RENAME: Error during Perl ACK transmission");
+		}
+		printf("Sent!\nFinished renaming.\nWaiting for Perl request... ");
 	}
-	if (rename("tempfile.txt", fileStructureFileName) != 0){
-		perror("RENAME: Error renaming new file structure to original name");
+	else{
+		printf("Sending NAK to Perl... ");
+		if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
+			perror("RENAME: Error during Perl NAK transmission");
+		}
+		printf("Sent!\nRenaming failed.\nWaiting for Perl request... ");
 	}
-	
-	fclose(oldUserFiles);
-	fclose(newUserFiles);
-	printf("Modified!\n");
-	
-	printf("Sending ACK to Perl... ");
-	if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
-		perror("RENAME: Error during Perl ACK transmission");
-	}
-	printf("Sent!\nFinished renaming.\nWaiting for Perl request... ");
 }
 
 /*
@@ -469,82 +599,127 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 void deleteFile(string username, char directory[SL], char filename[SL]){
 	nameNodeRequest* packet; // packet to send to data node
 	char ack[2]; // ACK packet from data node
+	int success = 1;
 	
-	printf("Deleting file %s%s\n", directory, filename);
-	int currSocket = 0, i;
-	for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are deleted
-		printf("Requesting deletion of file chunk %d on data node %d... ", i, currSocket);
-		packet = createPacket(DELETE, directory, filename, "", i); // sets up request packet
-		if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends delete request to data node
-			perror("DELETE: Error during delete request transmission to data node");
+	while (success){
+		printf("Deleting file %s%s\n", directory, filename);
+		int currSocket = 0, i;
+		for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are deleted
+			printf("Requesting deletion of file chunk %d on data node %d... ", i, currSocket);
+			packet = createPacket(DELETE, directory, filename, "", i); // sets up request packet
+			if (send(sockets[currSocket], &(*packet), sizeof(*packet), 0) <= 0){ // sends delete request to data node
+				perror("DELETE: Error during delete request transmission to data node");
+				success = 0;
+				break;
+			}
+			printf("Sent!\n");
+			
+			printf("Waiting for ACK from data node %d... ", currSocket);
+			memset(&ack[0], 0, sizeof(ack));
+			if (recv(sockets[currSocket], &ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
+				perror("DELETE: Error while waiting for ACK from data node");
+				success = 0;
+				break;
+			}
+			printf("Received!\n");
+			if (ack[0] == 'n' && ack[1] == 'o'){ // NAK packet has been received
+				printf("NAK received from data node\n");
+				success = 0;
+				break;
+			}
+			currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
 		}
-		printf("Sent!\n");
+		if (success == 0){
+			break; // not sure why this is necessary, but C is dumb
+		}
 		
-		printf("Waiting for ACK from data node %d... ", currSocket);
-		memset(&ack[0], 0, sizeof(ack));
-		if (recv(sockets[currSocket], &ack, sizeof(ack)/sizeof(char), 0) <= 0){ // receives ACK packet from data node
-			perror("DELETE: Error while waiting for ACK from data node");
+		printf("Removing file from user's file structure... \n");
+		char baseDirectory[SL];
+		strcpy(baseDirectory, baseDir); // initializes directory prefix
+		char per[] = ".";
+		char period[SL];
+		strcpy(period, per); // initializes period
+		
+		char userFileLoc[50];
+		//strcpy(fileDir, baseDirectory);
+		strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+		strcat(userFileLoc, username);
+		struct stat st = {0};
+		if (stat(userFileLoc, &st) == -1){ // check if directory exists
+			mkdir(userFileLoc, 0777); // if it doesn't, create it
 		}
-		printf("Received!\n");
-		currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
-	}
-	
-	printf("Removing file from user's file structure... \n");
-	char baseDirectory[SL];
-	strcpy(baseDirectory, baseDir); // initializes directory prefix
-	char per[] = ".";
-	char period[SL];
-	strcpy(period, per); // initializes period
-	
-	char userFileLoc[50];
-	//strcpy(fileDir, baseDirectory);
-	strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
-	strcat(userFileLoc, username);
-	if (chdir(userFileLoc) < 0){
-		perror("RENAME: Error changing directory to user's directory");
-	}
-	
-	char* fileStructureFileName = strcat(period, username);
-	FILE* oldUserFiles;
-	if ((oldUserFiles = fopen(fileStructureFileName, "r")) < 0){ // open user file structure
-		perror("RENAME: Error opening old file structure file");
-	}
-	FILE* newUserFiles;
-	if ((newUserFiles = fopen("tempfile.txt", "w")) < 0){ // open new file for copying over to
-		perror("RENAME: Error opening new user file structure file");
-	}
-	
-	char oldFilepath[50];
-	strcpy(oldFilepath, baseDirectory);
-	strcat(oldFilepath, directory);
-	strcat(oldFilepath, filename);
-	
-	char temp[512];
-	char* strLoc;
-	while(fgets(temp, sizeof(temp), oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
-		if((strLoc = strstr(temp, oldFilepath)) == NULL){ // copy everything but old filename
-			if(fprintf(newUserFiles, "%s", temp) < 0){
-				perror("RENAME: Error copying over file structure");
+		if (chdir(userFileLoc) < 0){
+			perror("RENAME: Error changing directory to user's directory");
+			success = 0;
+			break;
+		}
+		
+		char* fileStructureFileName = strcat(period, username);
+		FILE* oldUserFiles;
+		if ((oldUserFiles = fopen(fileStructureFileName, "r")) < 0){ // open user file structure
+			perror("RENAME: Error opening old file structure file");
+			success = 0;
+			break;
+		}
+		FILE* newUserFiles;
+		if ((newUserFiles = fopen("tempfile.txt", "w")) < 0){ // open new file for copying over to
+			perror("RENAME: Error opening new user file structure file");
+			success = 0;
+			break;
+		}
+		
+		char oldFilepath[50];
+		strcpy(oldFilepath, baseDirectory);
+		strcat(oldFilepath, directory);
+		strcat(oldFilepath, filename);
+		
+		char temp[512];
+		char* strLoc;
+		while(fgets(temp, sizeof(temp), oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
+			if((strLoc = strstr(temp, oldFilepath)) == NULL){ // copy everything but old filename
+				if(fprintf(newUserFiles, "%s", temp) < 0){
+					perror("RENAME: Error copying over file structure");
+					success = 0;
+					break;
+				}
 			}
 		}
+		if (success == 0){
+			break;
+		}
+		
+		if (remove(fileStructureFileName) < 0){ // finishes file deletion by overwriting old file structure
+			perror("DELETE: Error removing old file structure file");
+			success = 0;
+			break;
+		}
+		if (rename("tempfile.txt", fileStructureFileName) != 0){
+			perror("DELETE: Error renaming new file structure file to original name");
+			success = 0;
+			break;
+		}
+		
+		fclose(oldUserFiles);
+		fclose(newUserFiles);
+		printf("Removed!\n");
+		break;
 	}
 	
-	if (remove(fileStructureFileName) < 0){ // finishes file deletion by overwriting old file structure
-		perror("DELETE: Error removing old file structure file");
+	if (success){
+		printf("Sending ACK to Perl... ");
+		if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
+			perror("DELETE: Error during Perl ACK transmission");
+		}
+		printf("Sent!\nFinished deleting.\nWaiting for Perl request... ");
 	}
-	if (rename("tempfile.txt", fileStructureFileName) != 0){
-		perror("DELETE: Error renaming new file structure file to original name");
+	else{
+		printf("Sending NAK to Perl... ");
+		if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
+			perror("DELETE: Error during Perl NAK transmission");
+		}
+		printf("Sent!\nDeleting failed.\nWaiting for Perl request... ");
 	}
 	
-	fclose(oldUserFiles);
-	fclose(newUserFiles);
-	printf("Removed!\n");
-	
-	printf("Sending ACK to Perl... ");
-	if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
-		perror("DELETE: Error during Perl ACK transmission");
-	}
-	printf("Sent!\nFinished deleting.\nWaiting for Perl request... ");
 }
 
 /*
@@ -619,8 +794,8 @@ void *perlListener(void *ptr){
 			}
 			printf("Perl listener received new Perl request!\nAdding it to queue... ");
 			
-			Enqueue(Q, atoi(strtok(reqPacket,"\n")), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n")); // data received is line-delimited
-			printf("Enqueued!\n");
+			Enqueue(Q, atoi(strtok(reqPacket,"\n")), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n"));
+			printf("Enqueued!\n"); // data received is line-delimited, so process packet line by line
 		}
 	}
 }
@@ -655,8 +830,6 @@ int dataNodeConnector(char *dataNodeIP){ // Connects to data node and returns so
 	return 1;
 }
 
-
-
 /*
  * This function initializes a new queue
 */
@@ -668,7 +841,7 @@ perlRequestQueue* createQueue(){
 	Q->rear = -1;
 	Q->filling = 0;
 	Q->emptying = 0;
-	Q->requests = (perlRequest*)(malloc (SL*sizeof(perlRequest)));
+	Q->requests = (perlRequest*)(malloc (10*sizeof(perlRequest)));
 	return Q;
 }
 
@@ -678,7 +851,7 @@ perlRequestQueue* createQueue(){
 perlRequest* Dequeue(perlRequestQueue *Q){
 	perlRequest* returned;
 
-	if(Q->size==0){ // If perlRequestQueue size is zero then it is empty
+	if(Q->size==0){ // If perlRequestQueue size is zero, then it is empty
 		returned->operation = -1;
 		printf("perlRequestQueue is Empty\n");
 		return returned;
@@ -731,7 +904,7 @@ void Enqueue(perlRequestQueue* Q, int op, char dr[SL], char fn[SL], char un[SL],
 			temp->operation = DELETE;
 			break;
 		}
-		strcpy(temp->directory, dr); // inserts element at rear of queue
+		strcpy(temp->directory, dr); // inserts new Perl request at rear of queue
 		strcpy(temp->filename, fn);
 		strcpy(temp->username, un);
 		strcpy(temp->searchTerm, st);
