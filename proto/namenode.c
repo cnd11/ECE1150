@@ -30,7 +30,7 @@
 #define MY_IP "169.254.0.2"
 #define PERL_PORT 48066
 
-#define NUM_OF_DATA_NODES 1
+#define NUM_OF_DATA_NODES 2
 #define DATA_NODE_IP_1 "169.254.0.1"
 #define DATA_NODE_IP_2 "169.254.0.2"
 #define DATA_NODE_PORT 48011
@@ -109,8 +109,8 @@ int main(void){
 	ackPacket = "ok"; // sets of ACK and NAK packets
 	nakPacket = "no";
 	fldPacket = "fd";
-	//baseDir = "/var/www/data/"; // sets up base directory of filesystem
-	baseDir = "/";
+	baseDir = "/var/www/data/"; // sets up base directory of filesystem
+	//baseDir = "/";
 	
 	printf("Establishing connection to Perl program...\n");
 	pthread_t perlListenThread; // Establish connection to Perl program
@@ -118,10 +118,10 @@ int main(void){
 	while (!perlConnection);
 	
 	printf("Connecting to data nodes...\n");
-	/*while (errFlag != 0){ // wait for connection to be established to data nodes
+	while (errFlag != 0){ // wait for connection to be established to data nodes
 		errFlag = dataNodeConnector(DATA_NODE_IP_1) + dataNodeConnector(DATA_NODE_IP_2);
-	}*/
-	dataNodeConnector(DATA_NODE_IP_2); // TEMP DEBUGGING CONDITION
+	}
+	//dataNodeConnector(DATA_NODE_IP_2); // TEMP DEBUGGING CONDITION
 	
 	while(1){ // Main loop -- Dequeue requests as they come in and process them
 		if (Q->size != 0){
@@ -321,8 +321,8 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 		strcpy(period, per); // initializes period
 		
 		char userFileLoc[50];
-		//strcpy(fileDir, baseDirectory);
-		strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+		strcpy(fileDir, baseDirectory);
+		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		
 		struct stat st = {0};
@@ -504,8 +504,8 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 		strcpy(period, per); // initializes period
 		
 		char userFileLoc[50];
-		//strcpy(fileDir, baseDirectory);
-		strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+		strcpy(fileDir, baseDirectory);
+		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		struct stat st = {0};
 		if (stat(userFileLoc, &st) == -1){ // check if directory exists
@@ -641,8 +641,8 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 		strcpy(period, per); // initializes period
 		
 		char userFileLoc[50];
-		//strcpy(fileDir, baseDirectory);
-		strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
+		strcpy(fileDir, baseDirectory);
+		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		struct stat st = {0};
 		if (stat(userFileLoc, &st) == -1){ // check if directory exists
