@@ -28,12 +28,12 @@
 #define CHUNK_SIZE 5
 
 #define MY_IP "169.254.0.1"
-#define PERL_PORT 48074
+#define PERL_PORT 48083
 
-#define NUM_OF_DATA_NODES 1
+#define NUM_OF_DATA_NODES 2
 #define DATA_NODE_IP_1 "169.254.0.1"
 #define DATA_NODE_IP_2 "169.254.0.2"
-#define DATA_NODE_PORT 48011
+#define DATA_NODE_PORT 48017
 
 #define SL 30
 
@@ -96,24 +96,26 @@ int sockets[NUM_OF_DATA_NODES]; // array of data node socket descriptors
 int numOfSockets = 0; // number of currently connected data nodes
 
 static const nameNodeRequest EmptyStruct; // empty structure used for clearing structs
-char ackPacket[2]; // ACK and NAK packets
-char nakPacket[2];
-char fldPacket[2]; // failed packet -- notifies Perl if a search term was not found
+char ackPacket[3]; // ACK and NAK packets
+char nakPacket[3];
+char fldPacket[3]; // failed packet -- notifies Perl if a search term was not found
 const char* baseDir; // base directory of filesystem
 
 int main(void){
 	perlRequest* request;
-	int operation, errFlag, success = 1;
+	int operation, errFlag = 0, success = 1;
 	char directory[SL]; // current working directory
 	FILE* fp;
 	ackPacket[0] = 'o'; // sets up ACK and NAK packets
 	ackPacket[1] = 'k';
+	ackPacket[2] = '\0';
 	nakPacket[0] = 'n';
 	nakPacket[1] = 'o';
+	nakPacket[2] = '\0';
 	fldPacket[0] = 'f'; // sets up failed to find search term packet
 	fldPacket[1] = 'd';
+	fldPacket[2] = '\0';
 	baseDir = "/var/www/data/"; // sets up base directory of filesystem
-	//baseDir = "/";
 	
 	printf("Establishing connection to Perl program...\n");
 	pthread_t perlListenThread; // Establish connection to Perl program
@@ -121,10 +123,13 @@ int main(void){
 	while (!perlConnection);
 	
 	printf("Connecting to data nodes... \n");
-	// while (errFlag != 0){ // wait for connection to be established to data nodes
-		// errFlag = dataNodeConnector(DATA_NODE_IP_1) + dataNodeConnector(DATA_NODE_IP_2);
-	// }
-	dataNodeConnector(DATA_NODE_IP_2); // TEMP DEBUGGING CONDITION
+	while (errFlag != 1){ // wait for connection to be established to data nodes
+		errFlag = dataNodeConnector(DATA_NODE_IP_1);
+	}
+	errFlag = 0;
+	while (errFlag != 1){
+		errFlag = dataNodeConnector(DATA_NODE_IP_2);
+	}
 	printf("Connected!\n");
 	
 	while(1){ // Main loop -- Dequeue requests as they come in and process them
@@ -224,7 +229,7 @@ int readFile(char directory[SL], char filename[SL], int searchEnabled){
 				break;
 			}
 			
-			currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
+			currSocket = (currSocket + 1) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
 		}
 		break;
 	}
@@ -232,6 +237,7 @@ int readFile(char directory[SL], char filename[SL], int searchEnabled){
 	if (success){
 		if (!searchEnabled){
 			printf("Sending read ACK to Perl... ");
+			sleep(1);
 			if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 				perror("READ: Error during Perl ACK transmission");
 			}
@@ -244,6 +250,7 @@ int readFile(char directory[SL], char filename[SL], int searchEnabled){
 	else{
 		if (!searchEnabled){
 			printf("Sending read NAK to Perl... ");
+			sleep(1);
 			if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
 				perror("READ: Error during Perl NAK transmission");
 			}
@@ -311,7 +318,7 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 				success = 0;
 				break;
 			}
-			currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
+			currSocket = (currSocket+ 1) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
 		}
 		if (success == 0){
 			break; // not sure why this is necessary, but C is dumb
@@ -326,7 +333,6 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 		
 		char userFileLoc[50];
 		strcpy(userFileLoc, baseDirectory);
-		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		
 		struct stat st = {0};
@@ -351,9 +357,8 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 		
 		int overwritingOldFile = 0;
 		char temp[512];
-		char newFilepath[50];
-		strcpy(newFilepath, baseDirectory);
-		strcat(newFilepath, directory);
+		char newFilepath[100];
+		strcpy(newFilepath, directory);
 		strcat(newFilepath, filename);
 		char* strLoc;
 		while(fgets(temp, sizeof(temp), userFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
@@ -373,18 +378,19 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 		}
 		fclose(userFiles);
 		
-		printf("Deleting temporary local file... ");
-		if (remove(filename) != 0){ // Delete file after sending it
-			perror("WRITE: File deletion error");
-			success = 0;
-			break;
-		}
-		printf("Deleted!\nFinished writing.\nWaiting for Perl request... ");
+		// printf("Deleting temporary local file... ");
+		// if (remove(filename) != 0){ // Delete file after sending it
+			// perror("WRITE: File deletion error");
+			// success = 0;
+			// break;
+		// }
+		// printf("Deleted!\nFinished writing.\nWaiting for Perl request... ");
 		break;
 	}
 	
 	if (success){
 		printf("Sending ACK to Perl... ");
+		sleep(1);
 		if (send(perlSocket, &ackPacket, sizeof(ackPacket)/sizeof(char), 0) <= 0){
 			perror("WRITE: Error during Perl ACK transmission");
 		}
@@ -392,6 +398,7 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 	}
 	else{
 		printf("Sending NAK to Perl... ");
+		sleep(1);
 		if (send(perlSocket, &nakPacket, sizeof(nakPacket)/sizeof(char), 0) <= 0){
 			perror("WRITE: Error during Perl NAK transmission");
 		}
@@ -494,7 +501,7 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 				success = 0;
 				break;
 			}
-			currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
+			currSocket = (currSocket + 1) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
 		}
 		if (success == 0){
 			break; // not sure why this is necessary, but C is dumb
@@ -509,7 +516,6 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 		
 		char userFileLoc[50];
 		strcpy(userFileLoc, baseDirectory);
-		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		struct stat st = {0};
 		if (stat(userFileLoc, &st) == -1){ // check if directory exists
@@ -535,13 +541,11 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 			break;
 		}
 		
-		char oldFilepath[50];
-		strcpy(oldFilepath, baseDirectory);
-		strcat(oldFilepath, directory);
+		char oldFilepath[100];
+		strcpy(oldFilepath, directory);
 		strcat(oldFilepath, filename);
-		char newFilepath[50];
-		strcpy(newFilepath, baseDirectory);
-		strcat(newFilepath, directory);
+		char newFilepath[100];
+		strcpy(newFilepath, directory);
 		strcat(newFilepath, newFilename);
 		if (fprintf(newUserFiles, "%s\n", newFilepath) < 0){ // adds new filename to list of files
 			perror("RENAME: Error adding new filename to new user file structure file");
@@ -551,6 +555,7 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 		
 		char temp[512];
 		char* strLoc;
+		memset(&temp[0], 0, sizeof(temp));
 		while(fgets(temp, sizeof(temp), oldUserFiles) != NULL) { // reads in chunks of 512 bytes and searches for old filename
 			if((strLoc = strstr(temp, oldFilepath)) == NULL){ // copy everything but old filename
 				if(fprintf(newUserFiles, "%s", temp) < 0){
@@ -559,10 +564,15 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 					break;
 				}
 			}
+			memset(&temp[0], 0, sizeof(temp));
 		}
-		if (success = 0){
+		if (success == 0){
 			break;
 		}
+		
+		
+		fclose(oldUserFiles);
+		fclose(newUserFiles);
 		
 		if (remove(fileStructureFileName) < 0){ // finishes file rename by overwriting old file structure
 			perror("RENAME: Error deleting old file structure");
@@ -575,8 +585,6 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 			break;
 		}
 		
-		fclose(oldUserFiles);
-		fclose(newUserFiles);
 		printf("Modified!\n");
 		break;
 	}
@@ -631,7 +639,7 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 				success = 0;
 				break;
 			}
-			currSocket = (currSocket++) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
+			currSocket = (currSocket + 1) % NUM_OF_DATA_NODES; // iterate to next data node for next chunk retrieval
 		}
 		if (success == 0){
 			break; // not sure why this is necessary, but C is dumb
@@ -646,14 +654,13 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 		
 		char userFileLoc[50];
 		strcpy(userFileLoc, baseDirectory);
-		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		struct stat st = {0};
 		if (stat(userFileLoc, &st) == -1){ // check if directory exists
 			mkdir(userFileLoc, 0777); // if it doesn't, create it
 		}
 		if (chdir(userFileLoc) < 0){
-			perror("RENAME: Error changing directory to user's directory");
+			perror("DELETE: Error changing directory to user's directory");
 			success = 0;
 			break;
 		}
@@ -661,20 +668,19 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 		char* fileStructureFileName = strcat(period, username);
 		FILE* oldUserFiles;
 		if ((oldUserFiles = fopen(fileStructureFileName, "r")) < 0){ // open user file structure
-			perror("RENAME: Error opening old file structure file");
+			perror("DELETE: Error opening old file structure file");
 			success = 0;
 			break;
 		}
 		FILE* newUserFiles;
 		if ((newUserFiles = fopen("tempfile.txt", "w")) < 0){ // open new file for copying over to
-			perror("RENAME: Error opening new user file structure file");
+			perror("DELETE: Error opening new user file structure file");
 			success = 0;
 			break;
 		}
 		
-		char oldFilepath[50];
-		strcpy(oldFilepath, baseDirectory);
-		strcat(oldFilepath, directory);
+		char oldFilepath[100];
+		strcpy(oldFilepath, directory);
 		strcat(oldFilepath, filename);
 		
 		char temp[512];
@@ -777,20 +783,19 @@ void *perlListener(void *ptr){
 		printf("Listening.\n");
 		
 		while(1){
-			if (!perlConnection){
-				printf("Accepting incoming Perl connections... ");
-				struct sockaddr_in perlSocketAddr;
-				socklen_t perlSocketAddrLen = sizeof(perlSocketAddr);
-				if((perlSocket = accept(listenSocket, (struct sockaddr *) &perlSocketAddr, &perlSocketAddrLen)) < 0){ // accepts connections from Perl program
-					perror("PERL LISTENER: Error accepting Perl connection");
-					close(listenSocket);
-					exit(EXIT_FAILURE);
-				}
-				else{
-					perlConnection = 1;
-					printf("Connected to Perl program!\n");
-				}
+			printf("Accepting incoming Perl connections... ");
+			struct sockaddr_in perlSocketAddr;
+			socklen_t perlSocketAddrLen = sizeof(perlSocketAddr);
+			if((perlSocket = accept(listenSocket, (struct sockaddr *) &perlSocketAddr, &perlSocketAddrLen)) < 0){ // accepts connections from Perl program
+				perror("PERL LISTENER: Error accepting Perl connection");
+				close(listenSocket);
+				exit(EXIT_FAILURE);
 			}
+			else{
+				perlConnection = 1;
+				printf("Connected to Perl program!\n");
+			}
+
 		
 			memset(&reqPacket[0], 0, sizeof(reqPacket));
 			if (recv(perlSocket, reqPacket, sizeof(reqPacket), 0) <= 0){ // continuously listens for data from Perl
@@ -798,18 +803,18 @@ void *perlListener(void *ptr){
 			}
 			printf("Perl listener received new Perl request!\nAdding it to queue... ");
 			
-			int a = atoi(strtok(reqPacket,"\n")); // debugging lines
-			printf("%d\n", a);
+			int a = atoi(strtok(reqPacket,"\n")); // parses through packet
+			//printf("%d\n", a);
 			char* b = strtok(NULL,"\n");
-			printf("%s\n", b);
+			//printf("%s\n", b);
 			char* c = strtok(NULL,"\n");
-			printf("%s\n", c);
+			//printf("%s\n", c);
 			char* d = strtok(NULL,"\n");
-			printf("%s\n", d);
+			//printf("%s\n", d);
 			char* e = strtok(NULL,"\n");
-			printf("%s\n", e);
+			//printf("%s\n", e);
 			char* f = strtok(NULL,"\n");
-			printf("%s\n", f);
+			//printf("%s\n", f);
 			
 			Enqueue(Q, a, b, c, d, e, f);
 			printf("Enqueued!\n"); // data received is line-delimited, so process packet line by line
