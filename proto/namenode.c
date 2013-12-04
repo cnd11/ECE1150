@@ -27,10 +27,10 @@
 #define NUM_OF_CHUNKS 8
 #define CHUNK_SIZE 5
 
-#define MY_IP "169.254.0.2"
-#define PERL_PORT 48066
+#define MY_IP "169.254.0.1"
+#define PERL_PORT 48074
 
-#define NUM_OF_DATA_NODES 2
+#define NUM_OF_DATA_NODES 1
 #define DATA_NODE_IP_1 "169.254.0.1"
 #define DATA_NODE_IP_2 "169.254.0.2"
 #define DATA_NODE_PORT 48011
@@ -96,9 +96,9 @@ int sockets[NUM_OF_DATA_NODES]; // array of data node socket descriptors
 int numOfSockets = 0; // number of currently connected data nodes
 
 static const nameNodeRequest EmptyStruct; // empty structure used for clearing structs
-const char* ackPacket; // ACK and NAK packets
-const char* nakPacket;
-const char* fldPacket; // failed packet -- notifies Perl if a search term was not found
+char ackPacket[2]; // ACK and NAK packets
+char nakPacket[2];
+char fldPacket[2]; // failed packet -- notifies Perl if a search term was not found
 const char* baseDir; // base directory of filesystem
 
 int main(void){
@@ -106,9 +106,12 @@ int main(void){
 	int operation, errFlag, success = 1;
 	char directory[SL]; // current working directory
 	FILE* fp;
-	ackPacket = "ok"; // sets of ACK and NAK packets
-	nakPacket = "no";
-	fldPacket = "fd";
+	ackPacket[0] = 'o'; // sets up ACK and NAK packets
+	ackPacket[1] = 'k';
+	nakPacket[0] = 'n';
+	nakPacket[1] = 'o';
+	fldPacket[0] = 'f'; // sets up failed to find search term packet
+	fldPacket[1] = 'd';
 	baseDir = "/var/www/data/"; // sets up base directory of filesystem
 	//baseDir = "/";
 	
@@ -117,11 +120,12 @@ int main(void){
 	pthread_create(&perlListenThread, NULL, perlListener, NULL);
 	while (!perlConnection);
 	
-	printf("Connecting to data nodes...\n");
-	while (errFlag != 0){ // wait for connection to be established to data nodes
-		errFlag = dataNodeConnector(DATA_NODE_IP_1) + dataNodeConnector(DATA_NODE_IP_2);
-	}
-	//dataNodeConnector(DATA_NODE_IP_2); // TEMP DEBUGGING CONDITION
+	printf("Connecting to data nodes... \n");
+	// while (errFlag != 0){ // wait for connection to be established to data nodes
+		// errFlag = dataNodeConnector(DATA_NODE_IP_1) + dataNodeConnector(DATA_NODE_IP_2);
+	// }
+	dataNodeConnector(DATA_NODE_IP_2); // TEMP DEBUGGING CONDITION
+	printf("Connected!\n");
 	
 	while(1){ // Main loop -- Dequeue requests as they come in and process them
 		if (Q->size != 0){
@@ -321,7 +325,7 @@ void writeFile(char username[SL], char directory[SL], char filename[SL]){
 		strcpy(period, per); // initializes period
 		
 		char userFileLoc[50];
-		strcpy(fileDir, baseDirectory);
+		strcpy(userFileLoc, baseDirectory);
 		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		
@@ -504,7 +508,7 @@ void renameFile(char username[SL], char directory[SL], char filename[SL], char n
 		strcpy(period, per); // initializes period
 		
 		char userFileLoc[50];
-		strcpy(fileDir, baseDirectory);
+		strcpy(userFileLoc, baseDirectory);
 		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		struct stat st = {0};
@@ -641,7 +645,7 @@ void deleteFile(string username, char directory[SL], char filename[SL]){
 		strcpy(period, per); // initializes period
 		
 		char userFileLoc[50];
-		strcpy(fileDir, baseDirectory);
+		strcpy(userFileLoc, baseDirectory);
 		//strcpy(userFileLoc, "/home/"); // TEMP DEBUGGING TOOL
 		strcat(userFileLoc, username);
 		struct stat st = {0};
@@ -794,7 +798,20 @@ void *perlListener(void *ptr){
 			}
 			printf("Perl listener received new Perl request!\nAdding it to queue... ");
 			
-			Enqueue(Q, atoi(strtok(reqPacket,"\n")), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n"), strtok(NULL,"\n"));
+			int a = atoi(strtok(reqPacket,"\n")); // debugging lines
+			printf("%d\n", a);
+			char* b = strtok(NULL,"\n");
+			printf("%s\n", b);
+			char* c = strtok(NULL,"\n");
+			printf("%s\n", c);
+			char* d = strtok(NULL,"\n");
+			printf("%s\n", d);
+			char* e = strtok(NULL,"\n");
+			printf("%s\n", e);
+			char* f = strtok(NULL,"\n");
+			printf("%s\n", f);
+			
+			Enqueue(Q, a, b, c, d, e, f);
 			printf("Enqueued!\n"); // data received is line-delimited, so process packet line by line
 		}
 	}
