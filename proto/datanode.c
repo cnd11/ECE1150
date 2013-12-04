@@ -23,9 +23,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DATA_NODE_PORT 48011
+#define DATA_NODE_PORT 48017
 #define CHUNK_SIZE 5
-#define MY_IP "169.254.0.2"
+#define MY_IP "169.254.0.1"
 
 typedef enum { // operation request type
 	READ,
