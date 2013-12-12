@@ -33,7 +33,7 @@
 #define NUM_OF_DATA_NODES 1
 #define DATA_NODE_IP_1 "192.168.1.41"
 #define DATA_NODE_IP_2 "169.254.0.2"
-#define DATA_NODE_PORT 1600
+#define DATA_NODE_PORT 1601
 
 #define SL 30
 
@@ -195,6 +195,7 @@ int readFile(char directory[SL], char filename[SL], int searchEnabled){
 			success = 0;
 			break;
 		}
+		chown(filename, 33, 33);
 		printf("Reading file %s%s from data nodes.\n", directory, filename);
 		for (i = 0; i < NUM_OF_CHUNKS; i++){ // iterate through each chunk until all are concatenated
 			reqPacket = createPacket(READ, directory, filename, "", i);
@@ -759,6 +760,8 @@ void *perlListener(void *ptr){
 		printf("Creating Perl listener socket... ");
 		if((listenSocket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1){ // creates listen socket
 			perror("PERL LISTENER: Error creating socket");
+			close(listenSocket);
+			exit(EXIT_FAILURE);
 		}
 		printf("Created!\n");
 
@@ -778,7 +781,9 @@ void *perlListener(void *ptr){
 
 		printf("Starting listener for Perl connection attempts... ");
 		if(listen(listenSocket, 20) == -1){ // listens for connection attempts
-			perror("PERL LISTENER: Error listening for connection attempts");
+		  close(listenSocket);
+		       perror("PERL LISTENER: Error listening for connection attempts");
+		       exit(EXIT_FAILURE);
 		}
 		printf("Listening.\n");
 		
@@ -800,6 +805,8 @@ void *perlListener(void *ptr){
 			memset(&reqPacket[0], 0, sizeof(reqPacket));
 			if (recv(perlSocket, reqPacket, sizeof(reqPacket), 0) <= 0){ // continuously listens for data from Perl
 				perror("PERL LISTENER: Error while receiving data from Perl");
+				close(listenSocket);
+				exit(EXIT_FAILURE);
 			}
 			printf("Perl listener received new Perl request!\nAdding it to queue... ");
 			
@@ -844,6 +851,7 @@ int dataNodeConnector(char *dataNodeIP){ // Connects to data node and returns so
 	printf("Connecting to data node... ");
 	if (connect(connectSocket, (struct sockaddr *) &dataNodeAddr, sizeof(dataNodeAddr)) < 0){
 		perror("DATA NODE CONNECTION: Error connecting to data node");
+		close(connectSocket);
 		return 0;
 	}
 	printf("Connected to data node %s!\n", dataNodeIP);

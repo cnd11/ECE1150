@@ -23,7 +23,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DATA_NODE_PORT 1600
+#define DATA_NODE_PORT 1601
 #define CHUNK_SIZE 5
 #define MY_IP "192.168.1.41"
 
