@@ -23,8 +23,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DATA_NODE_PORT 1602
-#define CHUNK_SIZE 128
+#define DATA_NODE_PORT 1601
+#define CHUNK_SIZE 5
 #define MY_IP "192.168.1.41"
 
 typedef enum { // operation request type
@@ -54,7 +54,6 @@ int main(void){
 	printf("Creating data node listen socket... "); // creates socket
 	if((listenSocket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1){
 		perror("DATA NODE: Error creating listen socket");
-		close(listenSocket);
 		exit(EXIT_FAILURE);
 	}
 	printf("Created!\n");
@@ -76,7 +75,6 @@ int main(void){
 	printf("Starting listener for name node connection attempts... ");
 	if(listen(listenSocket, 20) == -1){ // starts listening
 		perror("DATA NODE: Error listening for incoming connections");
-		close(listenSocket);
 		exit(EXIT_FAILURE);
 	}
 	printf("Listening.\n");
@@ -86,7 +84,6 @@ int main(void){
 	printf("Accepting connections from name node... "); // starts accepting connections
 	if((nameNodeSocket = accept(listenSocket, (struct sockaddr *) &nameNodeSocketAddr, &nameNodeSocketAddrLen)) <= 0){
 		perror("DATA NODE: Error accepting new connection");
-		close(nameNodeSocket);
 		close(listenSocket);
 		exit(EXIT_FAILURE);
 	}
@@ -100,8 +97,6 @@ int main(void){
 		printf("Waiting for request from name node...");
 		if (recv(nameNodeSocket, &(*packet), sizeof(*packet), 0) <= 0){ // receives a packet from the name node
 			perror("DATA NODE: Error receiving request packet from name node");
-			close(listenSocket);
-			close(nameNodeSocket);
 			exit(EXIT_FAILURE); // connection lost, so exit
 		}
 		printf(" Received packet from name node!\n");

@@ -1,4 +1,4 @@
-/*
+B1;2c/*
 * This program performs the duties of the master name node on the distributed file system.
 * Written by Ben Kisley, 11/1/13
 */
@@ -25,14 +25,14 @@
 #include <unistd.h>
 
 #define NUM_OF_CHUNKS 8
-#define CHUNK_SIZE 128
+#define CHUNK_SIZE 5
 
-#define MY_IP "192.168.1.41" // name node IP
+#define MY_IP "192.168.1.41"
 #define PERL_PORT 1501
 
-#define NUM_OF_DATA_NODES 2
-#define DATA_NODE_IP_1 "192.168.1.41" // IP of data node 1 (in this case, data node is the name node as well so this is a local IP)
-#define DATA_NODE_IP_2 "98.239.240.199" // public IP of data node 2
+#define NUM_OF_DATA_NODES 1
+#define DATA_NODE_IP_1 "192.168.1.41"
+#define DATA_NODE_IP_2 "169.254.0.2"
 #define DATA_NODE_PORT 1602
 
 #define SL 30
@@ -126,10 +126,10 @@ int main(void){
 	while (errFlag != 1){ // wait for connection to be established to data nodes
 		errFlag = dataNodeConnector(DATA_NODE_IP_1);
 	}
-	errFlag = 0;
-	while (errFlag != 1){
-		errFlag = dataNodeConnector(DATA_NODE_IP_2);
-	}
+	//errFlag = 0;
+	//while (errFlag != 1){
+	//	errFlag = dataNodeConnector(DATA_NODE_IP_2);
+	//}
 	printf("Connected!\n");
 	
 	while(1){ // Main loop -- Dequeue requests as they come in and process them
