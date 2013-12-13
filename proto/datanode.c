@@ -25,7 +25,7 @@
 
 #define DATA_NODE_PORT 1602
 #define CHUNK_SIZE 128
-#define MY_IP "192.168.1.41"
+#define MY_IP "192.168.8.112"
 
 typedef enum { // operation request type
 	READ,
