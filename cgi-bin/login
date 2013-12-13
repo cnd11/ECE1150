@@ -1,18 +1,24 @@
 #!/usr/bin/perl -w
 
-push (@INC, '/home/pi/perl5/lib/perl5');
-
 use strict;
 use warnings;
 
 use CGI::Carp qw/fatalsToBrowser/;
 use CGI qw/standard/;
-use CGI qw/Ajax/;
+use CGI::Session;
 use Data::Dumper;
+use Auth;
 
-print "Content-type: text/html\r\n\r\n";
+my $cgi = CGI->new;
+my $session = CGI::Session->new($cgi);
 
-my $q = CGI->new;
+if( defined $session->param('logged_in') && 
+    $session->param('logged_in') == 1) {
+    
+    print $cgi->redirect(-URL =>'http://' . $ENV{SERVER_NAME} . '/cgi-bin/home');
+}
+
+print $cgi->header;
 
 print <<'QED';
 <!DOCTYPE html>
@@ -41,10 +47,11 @@ print <<'QED';
 	    <input id="uname" autocomplete="off" type="text" value="" placeholder="Name" name="uname"/>
 	    <input id="pword" type="password" value="" placeholder="Password" name="pword"/>
 	    <input id="submit" type="submit" value="Sign In" name="signIn"/>
+            <input id="signup" type="checkbox" value="signup" name="signup"><span id="s_text">Sign Up</span>
 	  </form>
 QED
-    my $pass_err = $q->param('pass');
-    my $user_err = $q->param('user');
+    my $pass_err = $cgi->param('pass');
+    my $user_err = $cgi->param('user');
     
     if(defined $pass_err || defined $user_err)  {
 	print '<div id="error" style="color:red;font-size:14px;">';

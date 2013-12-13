@@ -16,7 +16,6 @@ print $ans."\n";
 
 close( $socket );
 
-
 sub socket_factory {
     return  IO::Socket::INET->new( PeerAddr => $remote_host,
 				   PeerPort => $remote_port,

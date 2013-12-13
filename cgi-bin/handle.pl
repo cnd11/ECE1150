@@ -7,7 +7,7 @@ use CGI qw/:standard/;
 use CGI::Carp qw/fatalsToBrowser/;
 use Auth;
 
-my $cgi = new CGI;
+my $cgi = CGI->new;
 my $auth = new Auth;
 
 $auth->validate && exit 1;

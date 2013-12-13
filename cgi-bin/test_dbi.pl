@@ -1,4 +1,4 @@
-3#!/usr/bin/perl -w 
+#!/usr/bin/perl -w 
 print "Content-type: text/html\r\n\r\n";
 
 use strict;
@@ -29,18 +29,19 @@ $start = times();
 
 my $sql = <<'END_SQL';
 CREATE TABLE users (
-    id    INTEGER PRIMARY KEY,
+    id    INTEGER AUTO_INCREMENT PRIMARY KEY,
     uname VARCHAR(100),
     pword VARCHAR(30)
 )
 END_SQL
-    print "";
-#$dbh->do( $sql);
+
+#$dbh->do( $sql ) || die "meh";
+#$dbh->disconnect;
 
 #$dbh->do('INSERT INTO users (uname, pword) VALUES (?,?)',
 #	 undef, 'BOB', '1234');
 my $user = "\'BOB\'";
-my $sql_get = 'SELECT * FROM users WHERE uname='.$user;
+my $sql_get = 'SELECT * FROM users';
 my $sth = $dbh->prepare($sql_get);
 $sth->execute();
 

@@ -1,0 +1,6 @@
+1],..x[64] */
+/* output (y): either 0 or 1 */ 
+typedef struct
+{
+        double x[65];   
+        double y; /* if digit, test=0, 

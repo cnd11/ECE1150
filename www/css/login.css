@@ -85,3 +85,12 @@ input[type="submit"]:hover {
     background-image: -moz-linear-gradient(center top , rgb(77, 144, 254), rgb(53, 122, 232));
     background-color: rgb(53, 122, 232);
 }
+
+#signup,
+#s_text {
+    display:block;
+    float: right;
+    position: relative;
+    font-family: 'Open Sans', san-serif;
+    font-size: 14px;
+}

@@ -48,25 +48,25 @@ my @path_show = grep { $_=~s/\/var\/www\/data//g  } @files;
 
 @files = map { basename($_)  } @files;
 @path_show = grep { chomp( $_ ) } @path_show;
-my $full = "<table id='entry_table'> <tr> <td></td> <td></td> <td></td> </tr>";
+my $full = "<table>";
 
 foreach my $f (@path_show) {
-my $req = <<REQUEST;
-	      <tr id="R$f">
-		<td id="link">
-		  <a id="$f" target="_blank" download>$f</a>
+    my $req = <<REQUEST;
+	      <tr>
+		<td>
+		  <a id="$f" href="/data$f" target="_blank" download>$f</a>
 		</td>
 		<td>
 		  <a class="request" onClick="fetch_js(['$f'],[fetch_file])"> Request </a> 
 		</td>
 		<td>
-		  <a class="search" onClick="search_file(['search_term', '$f'],[search_file_res])" > Search </a> 
+	    <a class="search" onClick="search_file(['search_term', '$f'],[search_file_res])" > Search </a> 
 		</td>
 		<td>
-		  <a class="rename" onClick="rename_file(['rename_term', '$f'],[rename_file_res])" > Rename </a> 
+	    <a class="rename" onClick="rename_file(['rename_term', '$f'],[rename_file_res])" > Rename </a> 
 		</td>
 		<td>
-		  <a class="delete" onClick="delete_file(['$f'],[delete_file_res])" > Delete </a> 
+	    <a class="delete" onClick="delete_file(['$f'],[delete_file_res])" > Delete </a> 
 		</td>
 	      </tr>
 REQUEST
@@ -128,11 +128,8 @@ sub fetch_pl
 	or return "Cannot Fetch File " . $!;
 
     my $res;
-    $socket->read($res, 2);
     close( $socket ); 
-    
-    return( $res, $requested_file );
-=pod
+
     return $operation . "\n" .
 	   $requested_path . "\n" .
 	   $file_name ."\n" .
@@ -140,14 +137,11 @@ sub fetch_pl
 	   $search_term . "\n" .
 	   $new_filename . "\n*" .
 	   $res."*";
-=cut
 }
 
 sub search_pl {
     my $search_str = shift;
     my $requested_file = shift;
-    
-    if( $search_str eq "" || $requested_file eq "" ) { return ("FAILURE", $search_str); }
 
     #return  $search_str . "\n" . $requested_file;
     my $operation = "2";
@@ -177,10 +171,17 @@ sub search_pl {
 	or return "Cannot Fetch File " . $!;
 
     my $res;
-    $socket->read($res, 2);
-    close( $socket ); 
+    $socket->read($res, 3);
 
-    return ($res, $search_str);
+    close( $socket ); 
+    print "OK";
+    return $operation . "\n" .
+	   $requested_path . "\n" .
+	   $file_name ."\n" .
+	   $user_name . "\n" .
+	   $search_str . "\n" .
+	   $new_filename . "\n*" .
+	   $res."*";
 }
 
 sub rename_pl {
@@ -219,27 +220,13 @@ sub rename_pl {
     
     close( $socket ); 
 
-my $new_entry = <<REQUEST;
-	      <tr id="R$requested_file">
-		<td id="link">
-		  <a id="$requested_file" target="_blank" download>$requested_file</a>
-		</td>
-		<td>
-		  <a class="request" onClick="fetch_js(['$requested_file'],[fetch_file])"> Request </a> 
-		</td>
-		<td>
-		  <a class="search" onClick="search_file(['search_term', '$requested_file'],[search_file_res])" > Search </a> 
-		</td>
-		<td>
-		  <a class="rename" onClick="rename_file(['rename_term', '$requested_file'],[rename_file_res])" > Rename </a> 
-		</td>
-		<td>
-		  <a class="delete" onClick="delete_file(['$requested_file'],[delete_file_res])" > Delete </a> 
-		</td>
-	      </tr>
-REQUEST
-
-    return ($res, $requested_file, $new_entry);
+    return $operation . "\n" .
+	   $requested_path . "\n" .
+	   $file_name ."\n" .
+	   $user_name . "\n" .
+	   $search_str . "\n" .
+	   $new_filename . "\n*" .	  
+	   $res."*";
    
 }
 
@@ -278,8 +265,7 @@ sub delete_pl
     $socket->read($res, 3);
 
     close( $socket ); 
-    return ($res, $requested_file);
-=pod
+
     return $operation . "\n" .
 	   $requested_path . "\n" .
 	   $file_name ."\n" .
@@ -287,7 +273,6 @@ sub delete_pl
 	   $search_term . "\n" .
 	   $new_filename . "\n*" .
 	   $res."*";
-=cut
 }
 
 sub show_html 
@@ -327,11 +312,6 @@ return <<QED;
       
       <p id="uploads">    </p>
 
-      <div id="loading_msg" style="display:none"> 
-	  <p>
-	    You're operation is underway. We'll let you know when its done! 
-	  </p>
-      </div>
     </body>
   </html>
 QED

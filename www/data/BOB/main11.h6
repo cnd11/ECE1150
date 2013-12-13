@@ -1,0 +1,4 @@
+**************** */
+/* weights for the logistic regression model
+can be represented as an array of 65 doubles:
+      w_0 - bias 

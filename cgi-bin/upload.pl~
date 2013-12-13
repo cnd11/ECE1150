@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+B1;2c#!/usr/bin/perl -w
 
 use strict;
 use warnings;
@@ -53,14 +53,14 @@ if( $cgi->param('upload_file'))
 	
 	or print "Couldn't connect to $remote_host:$remote_port : $!\n";   
 
-=pod
+
     print $operation . " " . defined $operation."\n";
     print $requested_path . " " . defined $requested_path."\n";
     print $file_name . " " . defined $file_name."\n";
     print $user_name . " " . defined $user_name."\n";
     print $search_term . " " . defined $search_term."\n";
     print $new_filename . " " . defined $new_filename."\n";
-=cut
+
     if(defined $socket) {
 	$socket->send( $operation . "\n" .
 		       $requested_path. "\n" .
@@ -74,27 +74,7 @@ if( $cgi->param('upload_file'))
 	$socket->read($res, 3);
 
 	close( $socket );
-
-	my $path_file = "/$requested_path$file_name";
-
-print <<NEWENTRY;
-	      <tr id="R$path_file">
-		<td id="link">
-		  <a id="$path_file" target="_blank" download>$path_file</a>
-		</td>
-		<td>
-		  <a class="request" onClick="fetch_js(['$path_file'],[fetch_file])"> Request </a> 
-		</td>
-		<td>
-		  <a class="search" onClick="search_file(['search_term', '$path_file'],[search_file_res])" > Search </a> 
-		</td>
-		<td>
-		  <a class="rename" onClick="rename_file(['rename_term', '$path_file'],[rename_file_res])" > Rename </a> 
-		</td>
-		<td>
-		  <a class="delete" onClick="delete_file(['$path_file'],[delete_file_res])" > Delete </a> 
-		</td>
-	      </tr>
-NEWENTRY
+	print("wrote");
     }
+    #print "<a href='/data/$dir/$file_name' target='_blank' download>$file_name</a> <br>";    
 }

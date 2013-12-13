@@ -1,0 +1,8 @@
+sting data sets */
+
+/* sizes */
+#define NUM_TEST_DIGS 400
+
+#define NUM_TRAIN_DIGS 100
+
+typedef enum {TRAINING_DIGIT=0, TESTING_D

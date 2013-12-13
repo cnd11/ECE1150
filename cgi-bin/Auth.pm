@@ -21,7 +21,8 @@ sub new {
     $cgi = new CGI;
     $session = CGI::Session->new($cgi);
 
-    unless ( $session->id eq $cgi->cookie( 'CGISESSID' ) ) {
+    unless (defined  $cgi->cookie( 'CGISESSID' ) &&
+	    $session->id eq $cgi->cookie( 'CGISESSID' ) ) {
 	print "Set-cookie: " . $cgi->cookie( 'CGISESSID', $session->id ) . "\n";
     } 
 
@@ -85,24 +86,33 @@ sub check_credentials {
     {
 	$self->{ 'error_string' } = $errors;
 
-	print $errors;
 	return 1;
     }
-    
+      
     my $dbh = DBI->connect($dsn, $user, $password, {
 	                   PrintError => 0,
 			   RaiseError => 1,
 			   AutoCommit => 1,
 			   FetchHashKeyName => 'NAME_lc',
 			 });
+
     my $sql_get = 'SELECT * FROM users WHERE uname=' . "\'$user_name\'";
     my $sth = $dbh->prepare( $sql_get );
     $sth->execute();
     
     if( $DBI::rows <= 0 )
     {
-	$self->{ 'error_string' } = 'register=1';
-	return 1;
+	if( defined $cgi->param( 'signup' ) ) {
+	    $dbh->do('INSERT INTO users (uname, pword) VALUES (?,?)', 
+		     undef, $user_name, $user_pass);
+	    
+	    $dbh->disconnect;
+	    return 0;
+	} else { 
+	
+	    $self->{ 'error_string' } = 'register=1';
+	    return 1;
+	}
     }
     
     while( my $row_hr = $sth->fetchrow_hashref )
@@ -125,6 +135,10 @@ sub check_credentials {
 sub add_authorization {
     $session->param('logged_in', 1);
     $session->param('uname', $cgi->param('uname') );
+}
+
+sub remove_authorization {
+    $session->delete;
 }
 
 sub display_login_prompt {
