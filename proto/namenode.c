@@ -793,6 +793,7 @@ void *perlListener(void *ptr){
 			socklen_t perlSocketAddrLen = sizeof(perlSocketAddr);
 			if((perlSocket = accept(listenSocket, (struct sockaddr *) &perlSocketAddr, &perlSocketAddrLen)) < 0){ // accepts connections from Perl program
 				perror("PERL LISTENER: Error accepting Perl connection");
+				close(perlSocket);
 				close(listenSocket);
 				exit(EXIT_FAILURE);
 			}
@@ -805,6 +806,7 @@ void *perlListener(void *ptr){
 			memset(&reqPacket[0], 0, sizeof(reqPacket));
 			if (recv(perlSocket, reqPacket, sizeof(reqPacket), 0) <= 0){ // continuously listens for data from Perl
 				perror("PERL LISTENER: Error while receiving data from Perl");
+				close(perlSocket);
 				close(listenSocket);
 				exit(EXIT_FAILURE);
 			}
